@@ -703,10 +703,18 @@ inlineToHtml opts inline =
                                        WrapPreserve -> preEscapedString "\n"
     (LineBreak)      -> return $ (if writerHtml5 opts then H5.br else H.br)
                                  <> strToHtml "\n"
+    -- somewhat ugly 'element' variable added by neelkapse to add support for underlines (from docx)
     (Span (id',classes,kvs) ils)
                      -> inlineListToHtml opts ils >>=
-                           return . addAttrs opts attr' . H.span
-                        where attr' = (id',classes',kvs')
+                           return . addAttrs opts attr' . element
+                        where element = if "underline" == id'
+                                          then H.u
+                                          else H.span
+                              attr' = (id'',classes',kvs')
+                              -- ugly hack to get underline to produce clean HTML
+                              id'' = if "underline" == id' 
+                                      then "" 
+                                      else id'
                               classes' = filter (`notElem` ["csl-no-emph",
                                               "csl-no-strong",
                                               "csl-no-smallcaps"]) classes

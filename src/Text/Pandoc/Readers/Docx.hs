@@ -88,6 +88,10 @@ import Data.List (delete, (\\), intersect)
 import Text.TeXMath (writeTeX)
 import Data.Default (Default)
 import qualified Data.ByteString.Lazy as B
+-- added by Neel
+import System.FilePath
+import qualified Data.ByteString.Lazy.Char8 as C
+-- ends
 import qualified Data.Map as M
 import Control.Monad.Reader
 import Control.Monad.State
@@ -275,7 +279,7 @@ runStyleToTransform rPr
   | Just SubScrpt <- rVertAlign rPr =
       subscript . (runStyleToTransform rPr {rVertAlign = Nothing})
   | Just "single" <- rUnderline rPr =
-      emph . (runStyleToTransform rPr {rUnderline = Nothing})
+      (spanWith ("underline", [], [])) . (runStyleToTransform rPr {rUnderline = Nothing})
   | otherwise = id
 
 runToInlines :: Run -> DocxContext Inlines
@@ -301,7 +305,12 @@ runToInlines (Endnote bps) = do
 runToInlines (InlineDrawing fp bs ext) = do
   mediaBag <- gets docxMediaBag
   modify $ \s -> s { docxMediaBag = insertMedia fp Nothing bs mediaBag }
-  return $ imageWith (extentToAttr ext) fp "" ""
+  -- return $ imageWith (extentToAttr ext) fp "" ""
+  return $ imageWith (extentToAttr ext) (produceDataURI fp bs) "" ""
+
+produceDataURI :: FilePath -> C.ByteString -> String
+produceDataURI fp bs = 
+  "data:image/" ++ (tail . takeExtension) fp ++ ";base64," ++ C.unpack bs
 
 extentToAttr :: Extent -> Attr
 extentToAttr (Just (w, h)) =
@@ -358,7 +367,7 @@ parPartToInlines (BookMark _ anchor) =
 parPartToInlines (Drawing fp bs ext) = do
   mediaBag <- gets docxMediaBag
   modify $ \s -> s { docxMediaBag = insertMedia fp Nothing bs mediaBag }
-  return $ imageWith (extentToAttr ext) fp "" ""
+  return $ imageWith (extentToAttr ext) (produceDataURI fp bs) "" ""
 parPartToInlines (InternalHyperLink anchor runs) = do
   ils <- concatReduce <$> mapM runToInlines runs
   return $ link ('#' : anchor) "" ils
@@ -516,7 +525,7 @@ bodyPartToBlocks (ListItem pPr _ _ _ parparts) =
     bodyPartToBlocks $ Paragraph pPr' parparts
 bodyPartToBlocks (Tbl _ _ _ []) =
   return $ para mempty
-bodyPartToBlocks (Tbl cap _ look (r:rs)) = do
+bodyPartToBlocks (Tbl cap tblWidths look (r:rs)) = do
   let caption = text cap
       (hdr, rows) = case firstRowFormatting look of
         True -> (Just r, rs)
@@ -536,7 +545,9 @@ bodyPartToBlocks (Tbl cap _ look (r:rs)) = do
       -- moment. Width information is in the TblGrid field of the Tbl,
       -- so should be possible. Alignment might be more difficult,
       -- since there doesn't seem to be a column entity in docx.
-      alignments = replicate size AlignDefault
+      alignments = replicate size AlignRight
+      -- Added by neelkapse
+      -- widths = map fromIntegral tblWidths
       widths = replicate size 0 :: [Double]
 
   return $ table caption (zip alignments widths) hdrCells cells

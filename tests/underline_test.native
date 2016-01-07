@@ -1,0 +1,6 @@
+[Para [Str "This",Space,Str "is",Space,Emph [Str "emphasized"],Str ",",Space,Str "and",Space,Str "so",Space,Emph [Str "is",Space,Str "this"],Str "."]
+,Para [Str "This",Space,Str "is",Space,Span ("underline",[],[]) [Str "underlined"],Str ",",Space,Str "and",Space,Str "so",Space,Span ("underline",[],[]) [Str "is",Space,Str "this"],Str "."]
+,Para [Span ("underline",[],[]) [Emph [Str "This",Space,Str "is",Space,Str "Span ("underline",[],[])",Space,Str "and",Space,Str "em."]]]
+,Para [Str "So",Space,Str "is",Space,Span ("underline",[],[]) [Emph [Str "this"]],Space,Str "word."]
+,Para [Span ("underline",[],[]) [Emph [Str "This",Space,Str "is",Space,Str "Span ("underline",[],[])",Space,Str "and",Space,Str "em."]]]
+,Para [Str "So",Space,Str "is",Space,Span ("underline",[],[]) [Emph [Str "this"]],Space,Str "word."]]

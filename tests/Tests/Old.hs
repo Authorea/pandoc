@@ -88,6 +88,9 @@ tests = [ testGroup "markdown"
           [ testGroup "writer" (writerTests "html" ++ lhsWriterTests "html")
           , test "reader" ["-r", "html", "-w", "native", "-s"]
             "html-reader.html" "html-reader.native"
+          -- underline test added by neelkapse
+          , test "underline_writer" ["-r", "native", "-w", "html"]
+            "underline_test.native" "underline_test.html"
           ]
         , testGroup "s5"
           [ s5WriterTest "basic" ["-s"] "s5"
