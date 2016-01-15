@@ -521,9 +521,25 @@ elemToRow :: NameSpaces -> Element -> D Row
 elemToRow ns element | isElem ns "w" "tr" element =
   do
     let cellElems = findChildren (elemName ns "w" "tc") element
-    cells <- mapD (elemToCell ns) cellElems
+    let unmergedCellElems = concat $ map (unmergeCellsHorizontal ns) cellElems
+    cells <- mapD (elemToCell ns) unmergedCellElems
     return $ Row cells
 elemToRow _ _ = throwError WrongElem
+
+-- replicate the element based on the value of gridSpan. This way, merged cells 
+-- content will appear multiple times, but no data is lost (and details about 
+-- structure of table are maintained even in formats that do not support  
+-- merged cells)
+unmergeCellsHorizontal :: NameSpaces -> Element -> [Element]
+unmergeCellsHorizontal ns element 
+  | Just tblCellProperties <- findChild (elemName ns "w" "tcPr") element,
+    Just mergeWidthElem <- findChild (elemName ns "w" "gridSpan") tblCellProperties =
+    let mergeWidth = findAttr (elemName ns "w" "val") mergeWidthElem >>= stringToInteger
+    in
+      case mergeWidth of
+        Just n  -> replicate (fromIntegral n) element
+        Nothing -> [element] -- should this case be changed to be safer?
+unmergeCellsHorizontal _ element = [element]
 
 elemToCell :: NameSpaces -> Element -> D Cell
 elemToCell ns element | isElem ns "w" "tc" element =
@@ -561,6 +577,7 @@ elemToBodyPart ns element
   , (c:_) <- findChildren (elemName ns "m" "oMathPara") element =
       do
         expsLst <- eitherToD $ readOMML $ showElement c
+        -- return $ Paragraph defaultParagraphStyle [PlainRun (Run defaultRunStyle [TextRun "test_string"])]
         return $ OMathPara expsLst
 elemToBodyPart ns element
   | isElem ns "w" "p" element
@@ -683,6 +700,7 @@ elemToParPart ns element
     return $ InternalHyperLink anchor runs
 elemToParPart ns element
   | isElem ns "m" "oMath" element =
+    -- return $ PlainRun (Run defaultRunStyle [TextRun "test_string"])
     (eitherToD $ readOMML $ showElement element) >>= (return . PlainOMath)
 elemToParPart _ _ = throwError WrongElem
 

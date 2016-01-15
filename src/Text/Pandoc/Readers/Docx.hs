@@ -44,7 +44,7 @@ implemented, [-] means partially implemented):
   - [X] BulletList
   - [X] DefinitionList (styled with adjacent `DefinitionTerm` and `Definition`)
   - [X] Header (styled with `Heading#`)
-  - [ ] HorizontalRule
+  - [ ] HorizontalRule  (\hrule)
   - [-] Table (column widths and alignments not yet implemented)
 
 * Inlines
@@ -375,6 +375,7 @@ parPartToInlines (ExternalHyperLink target runs) = do
   ils <- concatReduce <$> mapM runToInlines runs
   return $ link target "" ils
 parPartToInlines (PlainOMath exps) = do
+  -- return $ spanWith ("inline_math", [], []) (fromList [Str "test_string"])
   return $ math $ writeTeX exps
 
 isAnchorSpan :: Inline -> Bool
@@ -552,6 +553,7 @@ bodyPartToBlocks (Tbl cap tblWidths look (r:rs)) = do
 
   return $ table caption (zip alignments widths) hdrCells cells
 bodyPartToBlocks (OMathPara e) = do
+  -- return $ plain $ fromList [Str "test_string_2"]
   return $ para $ displayMath (writeTeX e)
 
 
