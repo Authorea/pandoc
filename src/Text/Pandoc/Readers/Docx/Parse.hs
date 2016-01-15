@@ -112,6 +112,14 @@ mapD f xs =
   in
    concatMapM handler xs
 
+-- Does mapD over a function that returns a D list. Not sure if this is the 
+-- most idiomatic way to do this.
+--mapDList :: (a -> [D b]) -> [a] -> D [b]
+--mapDList f xs =
+--  let handler x = map (\y-> return [y]) `catchError` (\_ -> return [])) (f x)
+--  in
+--   concatMapM handler xs
+
 data Docx = Docx Document
           deriving Show
 
@@ -280,7 +288,8 @@ archiveToDocument zf = do
 
 elemToBody :: NameSpaces -> Element -> D Body
 elemToBody ns element | isElem ns "w" "body" element =
-  mapD (elemToBodyPart ns) (elChildren element) >>=
+  mapD (elemToBodyParts ns) (elChildren element) >>=
+    (\bpslist -> return $ concat bpslist) >>=
   (\bps -> return $ Body bps)
 elemToBody _ _ = throwError WrongElem
 
@@ -544,7 +553,7 @@ unmergeCellsHorizontal _ element = [element]
 elemToCell :: NameSpaces -> Element -> D Cell
 elemToCell ns element | isElem ns "w" "tc" element =
   do
-    cellContents <- mapD (elemToBodyPart ns) (elChildren element)
+    cellContents <- mapD (elemToBodyParts ns) (elChildren element) >>= (return . concat)
     return $ Cell cellContents
 elemToCell _ _ = throwError WrongElem
 
@@ -571,15 +580,21 @@ testBitMask bitMaskS n =
 stringToInteger :: String -> Maybe Integer
 stringToInteger s = listToMaybe $ map fst (reads s :: [(Integer, String)])
 
-elemToBodyPart :: NameSpaces -> Element -> D BodyPart
-elemToBodyPart ns element
+elemToBodyParts :: NameSpaces -> Element -> D [BodyPart]
+elemToBodyParts ns element
   | isElem ns "w" "p" element
-  , (c:_) <- findChildren (elemName ns "m" "oMathPara") element =
-      do
-        expsLst <- eitherToD $ readOMML $ showElement c
-        -- return $ Paragraph defaultParagraphStyle [PlainRun (Run defaultRunStyle [TextRun "test_string"])]
-        return $ OMathPara expsLst
-elemToBodyPart ns element
+  , (c:_) <- findChildren (elemName ns "m" "oMathPara") element = 
+    do
+      expsLst <- eitherToD $ readOMML $ showElement c
+      let (preMathElems, mathAndPostElems) = break (isElem ns "m" "oMathPara") (elChildren element)
+      let attribs = elAttribs element
+      preMathParts <- elemToBodyParts ns $ embedInPara ns attribs preMathElems
+      case mathAndPostElems of
+        [] -> sequence $ map return $ preMathParts ++ [OMathPara expsLst]
+        _:postMathElems -> do
+          postMathParts <- elemToBodyParts ns $ embedInPara ns attribs postMathElems
+          sequence $ map return $ preMathParts ++ [OMathPara expsLst] ++ postMathParts
+elemToBodyParts ns element
   | isElem ns "w" "p" element
   , Just (numId, lvl) <- getNumInfo ns element = do
     sty <- asks envParStyles
@@ -587,8 +602,8 @@ elemToBodyPart ns element
     parparts <- mapD (elemToParPart ns) (elChildren element)
     num <- asks envNumbering
     let levelInfo = lookupLevel numId lvl num
-    return $ ListItem parstyle numId lvl levelInfo parparts
-elemToBodyPart ns element
+    return $ [ListItem parstyle numId lvl levelInfo parparts]
+elemToBodyParts ns element
   | isElem ns "w" "p" element = do
       sty <- asks envParStyles
       let parstyle = elemToParagraphStyle ns element sty
@@ -597,9 +612,9 @@ elemToBodyPart ns element
        Just (numId, lvl) -> do
          num <- asks envNumbering
          let levelInfo = lookupLevel numId lvl num
-         return $ ListItem parstyle numId lvl levelInfo parparts
-       Nothing -> return $ Paragraph parstyle parparts
-elemToBodyPart ns element
+         return $ [ListItem parstyle numId lvl levelInfo parparts]
+       Nothing -> return $ [Paragraph parstyle parparts]
+elemToBodyParts ns element
   | isElem ns "w" "tbl" element = do
     let caption' = findChild (elemName ns "w" "tblPr") element
                    >>= findChild (elemName ns "w" "tblCaption")
@@ -617,8 +632,8 @@ elemToBodyPart ns element
     grid <- grid'
     tblLook <- tblLook'
     rows <- mapD (elemToRow ns) (elChildren element)
-    return $ Tbl caption grid tblLook rows
-elemToBodyPart _ _ = throwError WrongElem
+    return $ [Tbl caption grid tblLook rows]
+elemToBodyParts _ _ = throwError WrongElem
 
 lookupRelationship :: DocumentLocation -> RelId -> [Relationship] -> Maybe Target
 lookupRelationship docLocation relid rels =
@@ -738,7 +753,7 @@ elemToRun ns element
   , Just fnId <- findAttr (elemName ns "w" "id") ref = do
     notes <- asks envNotes
     case lookupFootnote fnId notes of
-      Just e -> do bps <- local (\r -> r {envLocation=InFootnote}) $ mapD (elemToBodyPart ns) (elChildren e)
+      Just e -> do bps <- local (\r -> r {envLocation=InFootnote}) $ mapD (elemToBodyParts ns) (elChildren e) >>= (return . concat)
                    return $ Footnote bps
       Nothing  -> return $ Footnote []
 elemToRun ns element
@@ -747,7 +762,7 @@ elemToRun ns element
   , Just enId <- findAttr (elemName ns "w" "id") ref = do
     notes <- asks envNotes
     case lookupEndnote enId notes of
-      Just e -> do bps <- local (\r -> r {envLocation=InEndnote}) $ mapD (elemToBodyPart ns) (elChildren e)
+      Just e -> do bps <- local (\r -> r {envLocation=InEndnote}) $ mapD (elemToBodyParts ns) (elChildren e) >>= (return . concat)
                    return $ Endnote bps
       Nothing  -> return $ Endnote []
 elemToRun ns element

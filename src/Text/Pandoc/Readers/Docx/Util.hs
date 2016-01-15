@@ -3,6 +3,7 @@ module Text.Pandoc.Readers.Docx.Util (
                                       , elemName
                                       , isElem
                                       , elemToNameSpaces
+                                      , embedInPara
                                       ) where
 
 import Text.XML.Light
@@ -24,3 +25,15 @@ isElem :: NameSpaces -> String -> String -> Element -> Bool
 isElem ns prefix name element =
   qName (elName element) == name &&
   qURI (elName element) == lookup prefix ns
+
+-- This function wraps the provided elements in a paragraph unit. This is not a 
+-- very pure function, since it alters XML.Light's AST, but it seems to be the 
+-- cleanest way to implement paragraph math that is embedded within textual 
+-- paragraph content
+embedInPara :: NameSpaces -> [Attr] -> [Element] -> Element
+embedInPara ns attribs elems = 
+    Element { elName = elemName ns "w" "p",
+              elAttribs = attribs,
+              elContent = map (\e -> Elem e) elems,
+              elLine = Nothing -- Should this really be nothing?
+            }
