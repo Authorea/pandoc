@@ -305,12 +305,7 @@ runToInlines (Endnote bps) = do
 runToInlines (InlineDrawing fp bs ext) = do
   mediaBag <- gets docxMediaBag
   modify $ \s -> s { docxMediaBag = insertMedia fp Nothing bs mediaBag }
-  -- return $ imageWith (extentToAttr ext) fp "" ""
-  return $ imageWith (extentToAttr ext) (produceDataURI fp bs) "" ""
-
-produceDataURI :: FilePath -> C.ByteString -> String
-produceDataURI fp bs = 
-  "data:image/" ++ (tail . takeExtension) fp ++ ";base64," ++ C.unpack bs
+  return $ imageWith (extentToAttr ext) fp "" ""
 
 extentToAttr :: Extent -> Attr
 extentToAttr (Just (w, h)) =
@@ -367,7 +362,7 @@ parPartToInlines (BookMark _ anchor) =
 parPartToInlines (Drawing fp bs ext) = do
   mediaBag <- gets docxMediaBag
   modify $ \s -> s { docxMediaBag = insertMedia fp Nothing bs mediaBag }
-  return $ imageWith (extentToAttr ext) (produceDataURI fp bs) "" ""
+  return $ imageWith (extentToAttr ext) fp "" ""
 parPartToInlines (InternalHyperLink anchor runs) = do
   ils <- concatReduce <$> mapM runToInlines runs
   return $ link ('#' : anchor) "" ils
@@ -520,7 +515,7 @@ bodyPartToBlocks (ListItem pPr numId lvl (Just levelInfo) parparts) = do
                                    ]
   blks <- bodyPartToBlocks (Paragraph pPr parparts)
   return $ divWith ("", ["list-item"], kvs) blks
-bodyPartToBlocks (ListItem pPr _ _ _ parparts) = 
+bodyPartToBlocks (ListItem pPr _ _ _ parparts) =
   let pPr' = pPr {pStyle = "ListParagraph": (pStyle pPr)}
   in
     bodyPartToBlocks $ Paragraph pPr' parparts
