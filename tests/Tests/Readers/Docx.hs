@@ -154,12 +154,6 @@ tests = [ testGroup "inlines"
             "inline code in subscript and superscript"
             "docx/verbatim_subsuper.docx"
             "docx/verbatim_subsuper.native"
-            -- following tests added by Neel
-          , testCompare
-            "Neel sandbox test file"
-            "docx/sandbox_test.docx"
-            "docx/sandbox_test.native"
-            -- end Neel's tests
           ]
         , testGroup "blocks"
           [ testCompare
