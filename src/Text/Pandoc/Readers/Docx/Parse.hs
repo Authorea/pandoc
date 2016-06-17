@@ -190,6 +190,8 @@ data BodyPart = Paragraph ParagraphStyle [ParPart]
               | ListItem ParagraphStyle String String (Maybe Level) [ParPart]
               | Tbl String TblGrid TblLook [Row]
               | OMathPara [Exp]
+              | Reference [BodyPart]
+-- TODO: Tentative definition, think about this more
               deriving Show
 
 type TblGrid = [Integer]
@@ -217,6 +219,9 @@ data ParPart = PlainRun Run
              | ExternalHyperLink URL [Run]
              | Drawing FilePath B.ByteString Extent
              | PlainOMath [Exp]
+             -- | Citation Run 
+-- TODO: Tentative definition, doesn't seem completely in keeping with the format used, but
+-- the new parser should only need a run, since no inference should really be done at this stage 
              deriving Show
 
 data Run = Run RunStyle [RunElem]
@@ -276,7 +281,6 @@ archiveToDocx archive = do
   doc <- runD (archiveToDocument archive) rEnv
   return $ Docx doc
 
-
 archiveToDocument :: Archive -> D Document
 archiveToDocument zf = do
   entry <- maybeToD $ findEntryByPath "word/document.xml" zf
@@ -286,12 +290,45 @@ archiveToDocument zf = do
   body <- elemToBody namespaces bodyElem
   return $ Document namespaces body
 
+-- Returns true if the given element is the first entry in a (simple) addin 
+-- (i.e. contains a r.instrText with contents "ADDIN ZOTERO_BIBL ... ")
+-- Here, "simple" means the representation in XML is simply a marked paragraph 
+isSimpleReferenceAddinStart :: NameSpaces -> Element -> Bool
+isSimpleReferenceAddinStart ns element
+  | isElem ns "w" "p" element = 
+    any ( (==) (strContent instrText)) addinList
+    where
+      rList = findChildren (elemName ns "w" "r") element
+      instrText:_ = filter (\el -> not . null $ findChildren (elemName ns "w" "instrText") el) rList
+      addinList = 
+        [
+          "ADDIN ZOTERO_BIBL {&quot;custom&quot;:[]} CSL_BIBLIOGRAPHY ",
+          "ADDIN Mendeley Bibliography CSL_BIBLIOGRAPHY "
+        ] 
+isSimpleReferenceAddinStart _ _ = False
+
+-- Returns true if the given element is the "endmarker" of a simple reference addin 
+-- (i.e. a p.r.fldChar with attribute fldCharType = "end") 
+isSimpleReferenceAddinEnd :: NameSpaces -> Element -> Bool
+isSimpleReferenceAddinEnd ns element | isElem ns "w" "p" element = 
+  maybe False ( (==) "end") $ do                 -- TODO: more idiomatic way to do this?
+    r <- findChild (elemName ns "w" "r") element
+    fldChar <- findChild (elemName ns "w" "fldChar") r
+    findAttr (elemName ns "w" "fldCharType") fldChar
+isSimpleReferenceAddinEnd _ _ = False
+
 elemToBody :: NameSpaces -> Element -> D Body
-elemToBody ns element | isElem ns "w" "body" element =
-  mapD (elemToBodyParts ns) (elChildren element) >>=
-    (\bpslist -> return $ concat bpslist) >>=
-  (\bps -> return $ Body bps)
+elemToBody ns element | isElem ns "w" "body" element = 
+  (sequence $ elemHandler ns (elChildren element) elemToBodyParts) >>= return . Body . concat
 elemToBody _ _ = throwError WrongElem
+
+elemHandler :: NameSpaces -> [Element] -> (NameSpaces -> Element -> D [BodyPart]) -> [D [BodyPart]]
+elemHandler ns (el:els) _ 
+  | isSimpleReferenceAddinStart ns el = elemToReference ns el : elemHandler ns els elemToReference
+elemHandler ns (el:els) _ 
+  | isSimpleReferenceAddinEnd ns el = elemToBodyParts ns el : elemHandler ns els elemToBodyParts -- Processing the ending tag to prevent any loss of data
+elemHandler ns (el:els) handler = handler ns el : elemHandler ns els handler
+elemHandler _ [] _ = []
 
 archiveToStyles :: Archive -> (CharStyleMap, ParStyleMap)
 archiveToStyles zf =
@@ -427,7 +464,6 @@ lookupLevel numId ilvl (Numbering _ numbs absNumbs) = do
   lvls <- lookup absNumId $ map (\(AbstractNumb aid ls) -> (aid, ls)) absNumbs
   lvl  <- lookup ilvl $ map (\l@(i, _, _, _) -> (i, l)) lvls
   return lvl
-
 
 numElemToNum :: NameSpaces -> Element -> Maybe Numb
 numElemToNum ns element |
@@ -605,6 +641,8 @@ elemToBodyParts ns element
     return $ [ListItem parstyle numId lvl levelInfo parparts]
 elemToBodyParts ns element
   | isElem ns "w" "p" element = do
+      -- (asks envParStyles) :: Reader ReaderEnv ParStyleMap
+      -- sty :: ParStyleMap
       sty <- asks envParStyles
       let parstyle = elemToParagraphStyle ns element sty
       parparts <- mapD (elemToParPart ns) (elChildren element)
@@ -634,6 +672,10 @@ elemToBodyParts ns element
     rows <- mapD (elemToRow ns) (elChildren element)
     return $ [Tbl caption grid tblLook rows]
 elemToBodyParts _ _ = throwError WrongElem
+
+elemToReference :: NameSpaces -> Element -> D [BodyPart]
+elemToReference ns element = 
+  elemToBodyParts ns element >>= return . return . Reference -- D_return . List_return
 
 lookupRelationship :: DocumentLocation -> RelId -> [Relationship] -> Maybe Target
 lookupRelationship docLocation relid rels =
@@ -717,6 +759,8 @@ elemToParPart ns element
   | isElem ns "m" "oMath" element =
     -- return $ PlainRun (Run defaultRunStyle [TextRun "test_string"])
     (eitherToD $ readOMML $ showElement element) >>= (return . PlainOMath)
+-- TODO: Add function case that uses findAttr in the guard to catch the EndNote tag, try to 
+-- manipulate contents to produce citation of some sort. Maybe call anystyle from here?
 elemToParPart _ _ = throwError WrongElem
 
 lookupFootnote :: String -> Notes -> Maybe Element
