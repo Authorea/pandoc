@@ -160,6 +160,7 @@ isEmptyPar (Paragraph _ parParts) =
   where
     isEmptyParPart (PlainRun (Run _ runElems)) = all isEmptyElem runElems
     isEmptyParPart _ = False
+    -- TODO: Potential addition here for citations?
     isEmptyElem (TextRun s) = trim s == ""
     isEmptyElem _           = True
 isEmptyPar _ = False
@@ -226,6 +227,7 @@ parPartToString :: ParPart -> String
 parPartToString (PlainRun run) = runToString run
 parPartToString (InternalHyperLink _ runs) = concatMap runToString runs
 parPartToString (ExternalHyperLink _ runs) = concatMap runToString runs
+-- TODO: Potential addition here for citations
 parPartToString _ = ""
 
 blacklistedCharStyles :: [String]
@@ -372,6 +374,7 @@ parPartToInlines (ExternalHyperLink target runs) = do
 parPartToInlines (PlainOMath exps) = do
   -- return $ spanWith ("inline_math", [], []) (fromList [Str "test_string"])
   return $ math $ writeTeX exps
+-- TODO: Insert code to convert parsed Docx citation to Pandoc citation
 
 isAnchorSpan :: Inline -> Bool
 isAnchorSpan (Span (_, classes, kvs) ils) =
@@ -550,6 +553,8 @@ bodyPartToBlocks (Tbl cap tblWidths look (r:rs)) = do
 bodyPartToBlocks (OMathPara e) = do
   -- return $ plain $ fromList [Str "test_string_2"]
   return $ para $ displayMath (writeTeX e)
+bodyPartToBlocks (Reference bplist) = error "unimplemented"
+-- TODO: add reference handling
 
 
 -- replace targets with generated anchors.
