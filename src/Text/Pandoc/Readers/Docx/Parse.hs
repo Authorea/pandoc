@@ -294,17 +294,18 @@ archiveToDocument zf = do
 -- (i.e. contains a r.instrText with contents "ADDIN ZOTERO_BIBL ... ")
 -- Here, "simple" means the representation in XML is simply a marked paragraph
 isSimpleReferenceAddinStart :: NameSpaces -> Element -> Bool
-isSimpleReferenceAddinStart ns element
-  | isElem ns "w" "p" element =
-    any ( (==) (strContent instrText)) addinList
-    where
-      rList = findChildren (elemName ns "w" "r") element
-      instrText:_ = filter (\el -> not . null $ findChildren (elemName ns "w" "instrText") el) rList
-      addinList =
-        [
-          "ADDIN ZOTERO_BIBL {&quot;custom&quot;:[]} CSL_BIBLIOGRAPHY ",
-          "ADDIN Mendeley Bibliography CSL_BIBLIOGRAPHY "
-        ]
+isSimpleReferenceAddinStart ns element | isElem ns "w" "p" element =
+  case strs of
+    []    -> False
+    str:_ -> any (\ addin -> addin == str) addinList
+  where
+    rList = findChildren (elemName ns "w" "r") element
+    strs = concatMap (\el -> maybe [] (return . strContent) (findChild (elemName ns "w" "instrText") el)) rList
+    addinList =
+      [
+        " ADDIN ZOTERO_BIBL {\"custom\":[]} CSL_BIBLIOGRAPHY ",
+        "ADDIN Mendeley Bibliography CSL_BIBLIOGRAPHY "
+      ]
 isSimpleReferenceAddinStart _ _ = False
 
 -- Returns true if the given element is the "endmarker" of a simple reference addin
@@ -318,8 +319,14 @@ isSimpleReferenceAddinEnd ns element | isElem ns "w" "p" element =
 isSimpleReferenceAddinEnd _ _ = False
 
 elemToBody :: NameSpaces -> Element -> D Body
+<<<<<<< 4e2f5cbe94a390d3850b61197d97ca96b760079b
 elemToBody ns element | isElem ns "w" "body" element =
   (sequence $ elemHandler ns (elChildren element) elemToBodyParts) >>= return . Body . concat
+=======
+elemToBody ns element | isElem ns "w" "body" element =
+  sequence (map (flip catchError (\_ -> return [])) (elemHandler ns (elChildren element) elemToBodyParts)) >>=
+    return . Body . concat
+>>>>>>> Important bug fix, Zotero and Mendeley references now parse into Pandoc AST (using a specially marked Div tag for now, representation may change)
 elemToBody _ _ = throwError WrongElem
 
 elemHandler :: NameSpaces -> [Element] -> (NameSpaces -> Element -> D [BodyPart]) -> [D [BodyPart]]
