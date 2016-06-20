@@ -294,19 +294,18 @@ archiveToDocument zf = do
 -- (i.e. contains a r.instrText with contents "ADDIN ZOTERO_BIBL ... ")
 -- Here, "simple" means the representation in XML is simply a marked paragraph 
 isSimpleReferenceAddinStart :: NameSpaces -> Element -> Bool
-isSimpleReferenceAddinStart ns element
-  | isElem ns "w" "p" element = 
-    any (\ addin -> maybe False (\ x -> addin == (strContent x)) instrText) addinList
-    where
-      rList = findChildren (elemName ns "w" "r") element
-      instrText = case filter (\el -> not . null $ findChildren (elemName ns "w" "instrText") el) rList of
-                    iText:_ -> Just iText
-                    []      -> Nothing
-      addinList = 
-        [
-          "ADDIN ZOTERO_BIBL {&quot;custom&quot;:[]} CSL_BIBLIOGRAPHY ",
-          "ADDIN Mendeley Bibliography CSL_BIBLIOGRAPHY "
-        ] 
+isSimpleReferenceAddinStart ns element | isElem ns "w" "p" element = 
+  case strs of
+    []    -> False
+    str:_ -> any (\ addin -> addin == str) addinList
+  where
+    rList = findChildren (elemName ns "w" "r") element
+    strs = concatMap (\el -> maybe [] (return . strContent) (findChild (elemName ns "w" "instrText") el)) rList
+    addinList = 
+      [
+        " ADDIN ZOTERO_BIBL {\"custom\":[]} CSL_BIBLIOGRAPHY ",
+        "ADDIN Mendeley Bibliography CSL_BIBLIOGRAPHY "
+      ] 
 isSimpleReferenceAddinStart _ _ = False
 
 -- Returns true if the given element is the "endmarker" of a simple reference addin 
@@ -321,7 +320,8 @@ isSimpleReferenceAddinEnd _ _ = False
 
 elemToBody :: NameSpaces -> Element -> D Body
 elemToBody ns element | isElem ns "w" "body" element = 
-  (sequence $ elemHandler ns (elChildren element) elemToBodyParts) >>= return . Body . concat
+  sequence (map (flip catchError (\_ -> return [])) (elemHandler ns (elChildren element) elemToBodyParts)) >>= 
+    return . Body . concat
 elemToBody _ _ = throwError WrongElem
 
 elemHandler :: NameSpaces -> [Element] -> (NameSpaces -> Element -> D [BodyPart]) -> [D [BodyPart]]
