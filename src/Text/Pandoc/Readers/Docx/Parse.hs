@@ -297,14 +297,17 @@ isSimpleReferenceAddinStart :: NameSpaces -> Element -> Bool
 isSimpleReferenceAddinStart ns element | isElem ns "w" "p" element =
   case strs of
     []    -> False
-    str:_ -> any (\ addin -> addin == str) addinList
+    str:_ -> any ((==) str) addinList
   where
     rList = findChildren (elemName ns "w" "r") element
     strs = concatMap (\el -> maybe [] (return . strContent) (findChild (elemName ns "w" "instrText") el)) rList
     addinList =
       [
         " ADDIN ZOTERO_BIBL {\"custom\":[]} CSL_BIBLIOGRAPHY ",
-        "ADDIN Mendeley Bibliography CSL_BIBLIOGRAPHY "
+        "ADDIN Mendeley Bibliography CSL_BIBLIOGRAPHY ",
+        " ADDIN EN.REFLIST ",
+        "ADDIN F1000_CSL_BIBLIOGRAPHY",
+        " ADDIN PAPERS2_CITATIONS <papers2_bibliography/>"
       ]
 isSimpleReferenceAddinStart _ _ = False
 
