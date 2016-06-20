@@ -551,10 +551,11 @@ bodyPartToBlocks (Tbl cap tblWidths look (r:rs)) = do
 
   return $ table caption (zip alignments widths) hdrCells cells
 bodyPartToBlocks (OMathPara e) = do
-  -- return $ plain $ fromList [Str "test_string_2"]
   return $ para $ displayMath (writeTeX e)
-bodyPartToBlocks (Reference bplist) = error "unimplemented"
--- TODO: add reference handling
+bodyPartToBlocks (Reference bplist) = 
+  mapM bodyPartToBlocks bplist >>= \ blkslist -> 
+    return $ divWith ("", ["reference"], []) $ mconcat blkslist
+-- TODO: check whether this reference representation is ideal
 
 
 -- replace targets with generated anchors.

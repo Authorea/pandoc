@@ -296,10 +296,12 @@ archiveToDocument zf = do
 isSimpleReferenceAddinStart :: NameSpaces -> Element -> Bool
 isSimpleReferenceAddinStart ns element
   | isElem ns "w" "p" element = 
-    any ( (==) (strContent instrText)) addinList
+    any (\ addin -> maybe False (\ x -> addin == (strContent x)) instrText) addinList
     where
       rList = findChildren (elemName ns "w" "r") element
-      instrText:_ = filter (\el -> not . null $ findChildren (elemName ns "w" "instrText") el) rList
+      instrText = case filter (\el -> not . null $ findChildren (elemName ns "w" "instrText") el) rList of
+                    iText:_ -> Just iText
+                    []      -> Nothing
       addinList = 
         [
           "ADDIN ZOTERO_BIBL {&quot;custom&quot;:[]} CSL_BIBLIOGRAPHY ",
