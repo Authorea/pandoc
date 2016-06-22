@@ -243,6 +243,8 @@ pandocToLaTeX options (Pandoc meta blocks) = do
 -- | Convert Elements to LaTeX
 elementToLaTeX :: WriterOptions -> Element -> State WriterState Doc
 elementToLaTeX _ (Blk block) = blockToLaTeX block
+-- This assumes that no inlines is equivalent to no meaning. This assumption may be wrong, check this.
+elementToLaTeX _ (Sec _ _ _ _ []) = return empty
 elementToLaTeX opts (Sec level _ (id',classes,_) title' elements) = do
   modify $ \s -> s{stInHeading = True}
   header' <- sectionHeader ("unnumbered" `elem` classes) id' level title'
