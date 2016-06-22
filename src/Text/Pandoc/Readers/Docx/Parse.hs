@@ -191,7 +191,10 @@ data BodyPart = Paragraph ParagraphStyle [ParPart]
               | Tbl String TblGrid TblLook [Row]
               | OMathPara [Exp]
               | Reference [BodyPart]
+              | RefStart
+              | RefEnd
 -- TODO: Tentative definition, think about this more
+
               deriving Show
 
 type TblGrid = [Integer]
@@ -291,10 +294,11 @@ archiveToDocument zf = do
   return $ Document namespaces body
 
 -- Returns true if the given element is the first entry in a (simple) addin
--- (i.e. contains a r.instrText with contents "ADDIN ZOTERO_BIBL ... ")
+-- (i.e. contains an r.instrText with contents "ADDIN ZOTERO_BIBL ... ") or
+-- the first entry in a Word-produced bibliography
 -- Here, "simple" means the representation in XML is simply a marked paragraph
-isSimpleReferenceAddinStart :: NameSpaces -> Element -> Bool
-isSimpleReferenceAddinStart ns element | isElem ns "w" "p" element =
+isSimpleReferenceStart :: NameSpaces -> Element -> Bool
+isSimpleReferenceStart ns element | isElem ns "w" "p" element =
   case strs of
     []    -> False
     str:_ -> any ((==) str) addinList
@@ -303,40 +307,36 @@ isSimpleReferenceAddinStart ns element | isElem ns "w" "p" element =
     strs = concatMap (\el -> maybe [] (return . strContent) (findChild (elemName ns "w" "instrText") el)) rList
     addinList =
       [
+        "BIBLIOGRAPHY ",  -- support Word's inbuilt bibliography creator
         " ADDIN ZOTERO_BIBL {\"custom\":[]} CSL_BIBLIOGRAPHY ",
         "ADDIN Mendeley Bibliography CSL_BIBLIOGRAPHY ",
         " ADDIN EN.REFLIST ",
         "ADDIN F1000_CSL_BIBLIOGRAPHY",
         " ADDIN PAPERS2_CITATIONS <papers2_bibliography/>"
       ]
-isSimpleReferenceAddinStart _ _ = False
+isSimpleReferenceStart _ _ = False
 
 -- Returns true if the given element is the "endmarker" of a simple reference addin
 -- (i.e. a p.r.fldChar with attribute fldCharType = "end")
-isSimpleReferenceAddinEnd :: NameSpaces -> Element -> Bool
-isSimpleReferenceAddinEnd ns element | isElem ns "w" "p" element =
+isSimpleReferenceEnd :: NameSpaces -> Element -> Bool
+isSimpleReferenceEnd ns element | isElem ns "w" "p" element =
   maybe False ( (==) "end") $ do                 -- TODO: more idiomatic way to do this?
     r <- findChild (elemName ns "w" "r") element
     fldChar <- findChild (elemName ns "w" "fldChar") r
     findAttr (elemName ns "w" "fldCharType") fldChar
-isSimpleReferenceAddinEnd _ _ = False
+isSimpleReferenceEnd _ _ = False
 
 elemToBody :: NameSpaces -> Element -> D Body
-<<<<<<< 4e2f5cbe94a390d3850b61197d97ca96b760079b
-elemToBody ns element | isElem ns "w" "body" element =
-  (sequence $ elemHandler ns (elChildren element) elemToBodyParts) >>= return . Body . concat
-=======
 elemToBody ns element | isElem ns "w" "body" element =
   sequence (map (flip catchError (\_ -> return [])) (elemHandler ns (elChildren element) elemToBodyParts)) >>=
     return . Body . concat
->>>>>>> Important bug fix, Zotero and Mendeley references now parse into Pandoc AST (using a specially marked Div tag for now, representation may change)
 elemToBody _ _ = throwError WrongElem
 
 elemHandler :: NameSpaces -> [Element] -> (NameSpaces -> Element -> D [BodyPart]) -> [D [BodyPart]]
 elemHandler ns (el:els) _
-  | isSimpleReferenceAddinStart ns el = elemToReference ns el : elemHandler ns els elemToReference
+  | isSimpleReferenceStart ns el = return [RefStart] : elemToReference ns el : elemHandler ns els elemToReference
 elemHandler ns (el:els) _
-  | isSimpleReferenceAddinEnd ns el = elemToBodyParts ns el : elemHandler ns els elemToBodyParts -- Processing the ending tag to prevent any loss of data
+  | isSimpleReferenceEnd ns el = return [RefEnd] : elemToBodyParts ns el : elemHandler ns els elemToBodyParts -- Processing the ending tag to prevent any loss of data, probably unnecessary
 elemHandler ns (el:els) handler = handler ns el : elemHandler ns els handler
 elemHandler _ [] _ = []
 

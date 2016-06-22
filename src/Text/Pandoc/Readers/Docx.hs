@@ -88,10 +88,6 @@ import Data.List (delete, (\\), intersect)
 import Text.TeXMath (writeTeX)
 import Data.Default (Default)
 import qualified Data.ByteString.Lazy as B
--- added by Neel
-import System.FilePath
-import qualified Data.ByteString.Lazy.Char8 as C
--- ends
 import qualified Data.Map as M
 import Control.Monad.Reader
 import Control.Monad.State
@@ -524,7 +520,7 @@ bodyPartToBlocks (ListItem pPr _ _ _ parparts) =
     bodyPartToBlocks $ Paragraph pPr' parparts
 bodyPartToBlocks (Tbl _ _ _ []) =
   return $ para mempty
-bodyPartToBlocks (Tbl cap tblWidths look (r:rs)) = do
+bodyPartToBlocks (Tbl cap _ look (r:rs)) = do -- (Tbl cap tblWidths look (r:rs)) = do
   let caption = text cap
       (hdr, rows) = case firstRowFormatting look of
         True -> (Just r, rs)
@@ -556,7 +552,8 @@ bodyPartToBlocks (Reference bplist) =
   mapM bodyPartToBlocks bplist >>= \ blkslist -> 
     return $ divWith ("", ["reference"], []) $ mconcat blkslist
 -- TODO: check whether this reference representation is ideal
-
+bodyPartToBlocks RefStart = return $ divWith ("", ["refstart"], []) (fromList [])
+bodyPartToBlocks RefEnd = return $ divWith ("", ["refend"], []) (fromList [])
 
 -- replace targets with generated anchors.
 rewriteLink' :: Inline -> DocxContext Inline
