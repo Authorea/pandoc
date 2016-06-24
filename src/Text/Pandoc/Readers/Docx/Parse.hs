@@ -615,6 +615,11 @@ elemToBodyParts ns element
          return $ [ListItem parstyle numId lvl levelInfo parparts]
        Nothing -> return $ [Paragraph parstyle parparts]
 elemToBodyParts ns element
+  | isElem ns "w" "sdt" element
+  , Just sdtContent <- findChild (elemName ns "w" "sdtContent") element = do
+    bodyparts <- mapD (elemToBodyParts ns) (elChildren sdtContent)
+    return $ concat bodyparts
+elemToBodyParts ns element
   | isElem ns "w" "tbl" element = do
     let caption' = findChild (elemName ns "w" "tblPr") element
                    >>= findChild (elemName ns "w" "tblCaption")
@@ -789,7 +794,8 @@ getParStyleField _ _ _ = Nothing
 
 elemToParagraphStyle :: NameSpaces -> Element -> ParStyleMap -> ParagraphStyle
 elemToParagraphStyle ns element sty
-  | Just pPr <- findChild (elemName ns "w" "pPr") element =
+  | Just pPr <- findChild (elemName ns "w" "pPr") element `mplus` 
+                findChild (elemName ns "w" "sdtPr") element = -- TODO: sdtPr here might not be doing anything, since the sdt case doesn't handle styling
     let style =
           mapMaybe
           (findAttr (elemName ns "w" "val"))
@@ -897,7 +903,8 @@ getBlockQuote _ _ = Nothing
 
 getNumInfo :: NameSpaces -> Element -> Maybe (String, String)
 getNumInfo ns element = do
-  let numPr = findChild (elemName ns "w" "pPr") element >>=
+  let numPr = findChild (elemName ns "w" "pPr") element `mplus` 
+              findChild (elemName ns "w" "sdtPr") element >>= -- TODO: sdtPr here might not be doing anything, since the sdt case doesn't handle styling
               findChild (elemName ns "w" "numPr")
       lvl = fromMaybe "0" (numPr >>=
                            findChild (elemName ns "w" "ilvl") >>=
