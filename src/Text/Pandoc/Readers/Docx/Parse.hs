@@ -599,7 +599,7 @@ elemToBodyParts ns element
   , Just (numId, lvl) <- getNumInfo ns element = do
     sty <- asks envParStyles
     let parstyle = elemToParagraphStyle ns element sty
-    parparts <- mapD (elemToParPart ns) (elChildren element)
+    parparts <- concat `liftM` mapD (elemToParParts ns) (elChildren element)
     num <- asks envNumbering
     let levelInfo = lookupLevel numId lvl num
     return $ [ListItem parstyle numId lvl levelInfo parparts]
@@ -607,7 +607,7 @@ elemToBodyParts ns element
   | isElem ns "w" "p" element = do
       sty <- asks envParStyles
       let parstyle = elemToParagraphStyle ns element sty
-      parparts <- mapD (elemToParPart ns) (elChildren element)
+      parparts <- concat `liftM` mapD (elemToParParts ns) (elChildren element)
       case pNumInfo parstyle of
        Just (numId, lvl) -> do
          num <- asks envNumbering
@@ -658,8 +658,8 @@ expandDrawingId s = do
         Nothing -> throwError DocxError
     Nothing -> throwError DocxError
 
-elemToParPart :: NameSpaces -> Element -> D ParPart
-elemToParPart ns element
+elemToParParts :: NameSpaces -> Element -> D [ParPart]
+elemToParParts ns element
   | isElem ns "w" "r" element
   , Just drawingElem <- findChild (elemName ns "w" "drawing") element =
     let a_ns = "http://schemas.openxmlformats.org/drawingml/2006/main"
@@ -667,41 +667,41 @@ elemToParPart ns element
                   >>= findAttr (QName "embed" (lookup "r" ns) (Just "r"))
     in
      case drawing of
-       Just s -> expandDrawingId s >>= (\(fp, bs) -> return $ Drawing fp bs $ elemToExtent drawingElem)
+       Just s -> expandDrawingId s >>= (\(fp, bs) -> return [Drawing fp bs $ elemToExtent drawingElem])
        Nothing -> throwError WrongElem
 -- The below is an attempt to deal with images in deprecated vml format.
-elemToParPart ns element
+elemToParParts ns element
   | isElem ns "w" "r" element
   , Just _ <- findChild (elemName ns "w" "pict") element =
     let drawing = findElement (elemName ns "v" "imagedata") element
                   >>= findAttr (elemName ns "r" "id")
     in
      case drawing of
-       Just s -> expandDrawingId s >>= (\(fp, bs) -> return $ Drawing fp bs Nothing)
+       Just s -> expandDrawingId s >>= (\(fp, bs) -> return [Drawing fp bs Nothing])
        Nothing -> throwError WrongElem
-elemToParPart ns element
+elemToParParts ns element
   | isElem ns "w" "r" element =
-    elemToRun ns element >>= (\r -> return $ PlainRun r)
-elemToParPart ns element
+    elemToRun ns element >>= (\r -> return [PlainRun r])
+elemToParParts ns element
   | isElem ns "w" "ins" element
   , Just cId <- findAttr (elemName ns "w" "id") element
   , Just cAuthor <- findAttr (elemName ns "w" "author") element
   , Just cDate <- findAttr (elemName ns "w" "date") element = do
     runs <- mapD (elemToRun ns) (elChildren element)
-    return $ Insertion cId cAuthor cDate runs
-elemToParPart ns element
+    return [Insertion cId cAuthor cDate runs]
+elemToParParts ns element
   | isElem ns "w" "del" element
   , Just cId <- findAttr (elemName ns "w" "id") element
   , Just cAuthor <- findAttr (elemName ns "w" "author") element
   , Just cDate <- findAttr (elemName ns "w" "date") element = do
     runs <- mapD (elemToRun ns) (elChildren element)
-    return $ Deletion cId cAuthor cDate runs
-elemToParPart ns element
+    return [Deletion cId cAuthor cDate runs]
+elemToParParts ns element
   | isElem ns "w" "bookmarkStart" element
   , Just bmId <- findAttr (elemName ns "w" "id") element
   , Just bmName <- findAttr (elemName ns "w" "name") element =
-    return $ BookMark bmId bmName
-elemToParPart ns element
+    return [BookMark bmId bmName]
+elemToParParts ns element
   | isElem ns "w" "hyperlink" element
   , Just relId <- findAttr (elemName ns "r" "id") element = do
     location <- asks envLocation
@@ -710,19 +710,22 @@ elemToParPart ns element
     case lookupRelationship location relId rels of
       Just target -> do
          case findAttr (elemName ns "w" "anchor") element of
-             Just anchor -> return $ ExternalHyperLink (target ++ '#':anchor) runs
-             Nothing -> return $ ExternalHyperLink target runs
-      Nothing     -> return $ ExternalHyperLink "" runs
-elemToParPart ns element
+             Just anchor -> return [ExternalHyperLink (target ++ '#':anchor) runs]
+             Nothing -> return [ExternalHyperLink target runs]
+      Nothing     -> return [ExternalHyperLink "" runs]
+elemToParParts ns element
   | isElem ns "w" "hyperlink" element
   , Just anchor <- findAttr (elemName ns "w" "anchor") element = do
     runs <- mapD (elemToRun ns) (elChildren element)
-    return $ InternalHyperLink anchor runs
-elemToParPart ns element
+    return [InternalHyperLink anchor runs]
+elemToParParts ns element
   | isElem ns "m" "oMath" element =
-    -- return $ PlainRun (Run defaultRunStyle [TextRun "test_string"])
-    (eitherToD $ readOMML $ showElement element) >>= (return . PlainOMath)
-elemToParPart _ _ = throwError WrongElem
+    (eitherToD $ readOMML $ showElement element) >>= (return . return . PlainOMath)
+elemToParParts ns element
+  | isElem ns "w" "sdt" element
+  , Just sdtContent <- findChild (elemName ns "w" "sdtContent") element = do
+    concat `liftM` mapD (elemToParParts ns) (elChildren sdtContent)
+elemToParParts _ _ = throwError WrongElem
 
 lookupFootnote :: String -> Notes -> Maybe Element
 lookupFootnote s (Notes _ fns _) = fns >>= (M.lookup s)
