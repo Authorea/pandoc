@@ -293,14 +293,6 @@ archiveToDocument zf = do
   body <- elemToBody namespaces bodyElem
   return $ Document namespaces body
 
-<<<<<<< HEAD
--- Returns true if the given element is the first entry in a (simple) addin
--- (i.e. contains an r.instrText with contents "ADDIN ZOTERO_BIBL ... ") or
--- the first entry in a Word-produced bibliography
--- Here, "simple" means the representation in XML is simply a marked paragraph
-isSimpleReferenceStart :: NameSpaces -> Element -> Bool
-isSimpleReferenceStart ns element | isElem ns "w" "p" element =
-=======
 -- Returns true if the given element is the first entry in a (simple) addin
 -- (i.e. contains an r.instrText with contents "ADDIN ZOTERO_BIBL ... ") or
 -- the first entry in a Word-produced bibliography
