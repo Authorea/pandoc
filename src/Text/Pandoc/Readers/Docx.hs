@@ -548,8 +548,8 @@ bodyPartToBlocks (Tbl cap _ look (r:rs)) = do -- (Tbl cap tblWidths look (r:rs))
   return $ table caption (zip alignments widths) hdrCells cells
 bodyPartToBlocks (OMathPara e) = do
   return $ para $ displayMath (writeTeX e)
-bodyPartToBlocks (Reference bplist) = 
-  mapM bodyPartToBlocks bplist >>= \ blkslist -> 
+bodyPartToBlocks (Reference bplist) =
+  mapM bodyPartToBlocks bplist >>= \ blkslist ->
     return $ divWith ("", ["reference"], []) $ mconcat blkslist
 -- TODO: check whether this reference representation is ideal
 bodyPartToBlocks RefStart = return $ divWith ("", ["refstart"], []) (fromList [])

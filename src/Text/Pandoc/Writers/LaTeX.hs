@@ -406,8 +406,8 @@ blockToLaTeX (Div (identifier,classes,kvs) bs) = do
       wrapRefEnd txt = if "refend" `elem` classes
                           then "\\end{wordbibliography}"
                           else linkAnchor $$ txt
-      -- TODO: add "wrapRefs" or something, similar to wrapNotes, which 
-      -- conditionally adds extra formatting specific to references 
+      -- TODO: add "wrapRefs" or something, similar to wrapNotes, which
+      -- conditionally adds extra formatting specific to references
       -- (if a Div (_, ["reference"], _) tag is seen).
   fmap (wrapDir . wrapLang . wrapNotes . wrapRefs . wrapRefStart . wrapRefEnd) $ blockListToLaTeX bs
 blockToLaTeX (Plain lst) =
