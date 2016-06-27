@@ -112,7 +112,7 @@ mapD f xs =
   in
    concatMapM handler xs
 
--- Does mapD over a function that returns a D list. Not sure if this is the 
+-- Does mapD over a function that returns a D list. Not sure if this is the
 -- most idiomatic way to do this.
 --mapDList :: (a -> [D b]) -> [a] -> D [b]
 --mapDList f xs =
@@ -400,7 +400,7 @@ filePathToRelationships ar fp | Just relType <- filePathToRelType fp
                               , Just relElems <- (parseXMLDoc . UTF8.toStringLazy . fromEntry) entry =
   mapMaybe (relElemToRelationship relType) $ elChildren relElems
 filePathToRelationships _ _ = []
-                               
+
 archiveToRelationships :: Archive -> [Relationship]
 archiveToRelationships archive =
   concatMap (filePathToRelationships archive) $ filesInArchive archive
@@ -535,12 +535,12 @@ elemToRow ns element | isElem ns "w" "tr" element =
     return $ Row cells
 elemToRow _ _ = throwError WrongElem
 
--- replicate the element based on the value of gridSpan. This way, merged cells 
--- content will appear multiple times, but no data is lost (and details about 
--- structure of table are maintained even in formats that do not support  
+-- replicate the element based on the value of gridSpan. This way, merged cells
+-- content will appear multiple times, but no data is lost (and details about
+-- structure of table are maintained even in formats that do not support
 -- merged cells)
 unmergeCellsHorizontal :: NameSpaces -> Element -> [Element]
-unmergeCellsHorizontal ns element 
+unmergeCellsHorizontal ns element
   | Just tblCellProperties <- findChild (elemName ns "w" "tcPr") element,
     Just mergeWidthElem <- findChild (elemName ns "w" "gridSpan") tblCellProperties =
     let mergeWidth = findAttr (elemName ns "w" "val") mergeWidthElem >>= stringToInteger
@@ -583,7 +583,7 @@ stringToInteger s = listToMaybe $ map fst (reads s :: [(Integer, String)])
 elemToBodyParts :: NameSpaces -> Element -> D [BodyPart]
 elemToBodyParts ns element
   | isElem ns "w" "p" element
-  , (c:_) <- findChildren (elemName ns "m" "oMathPara") element = 
+  , (c:_) <- findChildren (elemName ns "m" "oMathPara") element =
     do
       expsLst <- eitherToD $ readOMML $ showElement c
       let (preMathElems, mathAndPostElems) = break (isElem ns "m" "oMathPara") (elChildren element)
@@ -797,7 +797,7 @@ getParStyleField _ _ _ = Nothing
 
 elemToParagraphStyle :: NameSpaces -> Element -> ParStyleMap -> ParagraphStyle
 elemToParagraphStyle ns element sty
-  | Just pPr <- findChild (elemName ns "w" "pPr") element `mplus` 
+  | Just pPr <- findChild (elemName ns "w" "pPr") element `mplus`
                 findChild (elemName ns "w" "sdtPr") element = -- TODO: sdtPr here might not be doing anything, since the sdt case doesn't handle styling
     let style =
           mapMaybe
@@ -906,7 +906,7 @@ getBlockQuote _ _ = Nothing
 
 getNumInfo :: NameSpaces -> Element -> Maybe (String, String)
 getNumInfo ns element = do
-  let numPr = findChild (elemName ns "w" "pPr") element `mplus` 
+  let numPr = findChild (elemName ns "w" "pPr") element `mplus`
               findChild (elemName ns "w" "sdtPr") element >>= -- TODO: sdtPr here might not be doing anything, since the sdt case doesn't handle styling
               findChild (elemName ns "w" "numPr")
       lvl = fromMaybe "0" (numPr >>=
