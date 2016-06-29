@@ -70,6 +70,8 @@ import Text.TeXMath (Exp)
 import Text.Pandoc.Readers.Docx.Util
 import Data.Char (readLitChar, ord, chr, isDigit)
 
+import Debug.Trace
+
 data ReaderEnv = ReaderEnv { envNotes         :: Notes
                            , envNumbering     :: Numbering
                            , envRelationships :: [Relationship]
@@ -293,6 +295,20 @@ archiveToDocument zf = do
   body <- elemToBody namespaces bodyElem
   return $ Document namespaces body
 
+addinList :: [String]
+addinList =
+  [
+    " ADDIN ZOTERO_BIBL {\"custom\":[]} CSL_BIBLIOGRAPHY ",
+    "ADDIN Mendeley Bibliography CSL_BIBLIOGRAPHY ",
+    " ADDIN EN.REFLIST ",
+    "ADDIN F1000_CSL_BIBLIOGRAPHY",
+    " ADDIN PAPERS2_CITATIONS <papers2_bibliography/>",
+    " BIBLIOGRAPHY "
+  ]
+
+wordReferenceIdentifier :: String
+wordReferenceIdentifier = " BIBLIOGRAPHY "
+
 -- Returns true if the given element is the first entry in a (simple) addin
 -- (i.e. contains an r.instrText with contents "ADDIN ZOTERO_BIBL ... ") or
 -- the first entry in a Word-produced bibliography
@@ -305,15 +321,18 @@ isSimpleReferenceStart ns element | isElem ns "w" "p" element =
   where
     rList = findChildren (elemName ns "w" "r") element
     strs = concatMap (\el -> maybe [] (return . strContent) (findChild (elemName ns "w" "instrText") el)) rList
-    addinList =
-      [
-        "BIBLIOGRAPHY ",  -- support Word's inbuilt bibliography creator
-        " ADDIN ZOTERO_BIBL {\"custom\":[]} CSL_BIBLIOGRAPHY ",
-        "ADDIN Mendeley Bibliography CSL_BIBLIOGRAPHY ",
-        " ADDIN EN.REFLIST ",
-        "ADDIN F1000_CSL_BIBLIOGRAPHY",
-        " ADDIN PAPERS2_CITATIONS <papers2_bibliography/>"
-      ]
+isSimpleReferenceStart ns element | isElem ns "w" "sdt" element =
+  case strs of
+    []    -> False
+    str:_ -> str == wordReferenceIdentifier
+  where
+    sdtParagraphs = maybe [] id $ do -- flattens one layer of sdt wrapping
+      sdtContent <- findChild (elemName ns "w" "sdtContent") element
+      sdtNested <- findChild (elemName ns "w" "sdt") sdtContent
+      sdtNestedContent <- findChild (elemName ns "w" "sdtContent") sdtNested
+      return $ findChildren (elemName ns "w" "p") `concatMap` [sdtContent, sdtNestedContent]
+    rList = concatMap (findChildren (elemName ns "w" "r")) sdtParagraphs
+    strs = concatMap (\el -> maybe [] (return . strContent) (findChild (elemName ns "w" "instrText") el)) rList
 isSimpleReferenceStart _ _ = False
 
 -- Returns true if the given element is the "endmarker" of a simple reference addin
@@ -324,19 +343,42 @@ isSimpleReferenceEnd ns element | isElem ns "w" "p" element =
     r <- findChild (elemName ns "w" "r") element
     fldChar <- findChild (elemName ns "w" "fldChar") r
     findAttr (elemName ns "w" "fldCharType") fldChar
+isSimpleReferenceEnd ns element
+  | isElem ns "w" "sdt" element
+  , Just sdtContent <- findChild (elemName ns "w" "sdtContent") element =
+    any (maybe False ((==) "end")) $ map getFldCharType $ (trace (show $ pList sdtContent) $ pList sdtContent)
+    where
+      getFldCharType el = do
+        r <- findChild (elemName ns "w" "r") el
+        fldChar <- findChild (elemName ns "w" "fldChar") r
+        findAttr (elemName ns "w" "fldCharType") fldChar
+      pList sdtContent =
+        elChildren sdtContent ++
+        elChildren `concatMap`
+        (findChildren (elemName ns "w" "sdtContent") `concatMap`
+        findChildren (elemName ns "w" "sdt") sdtContent)
 isSimpleReferenceEnd _ _ = False
 
 elemToBody :: NameSpaces -> Element -> D Body
 elemToBody ns element | isElem ns "w" "body" element =
-  sequence (map (flip catchError (\_ -> return [])) (elemHandler ns (elChildren element) elemToBodyParts)) >>=
+  sequence (map (flip catchError (\_ -> return [])) (elemHandler ns elements elemToBodyParts)) >>=
     return . Body . concat
+  where
+    elements = sdtFlatten `concatMap` (sdtFlatten `concatMap` (elChildren element)) -- TODO: Modify this to flatten for sdt
+    sdtFlatten el
+      | isElem ns "w" "sdt" el
+      , Just sdtContent <- findChild (elemName ns "w" "sdtContent") el = elChildren sdtContent
+    sdtFlatten el = [el]
 elemToBody _ _ = throwError WrongElem
 
 elemHandler :: NameSpaces -> [Element] -> (NameSpaces -> Element -> D [BodyPart]) -> [D [BodyPart]]
+-- elemHandler ns (el:els) _
+--   | isSimpleReferenceStart ns el,
+--     isSimpleReferenceEnd ns el = return [RefStart] : elemToReference ns el : return [RefEnd] : elemHandler ns els elemToReference
 elemHandler ns (el:els) _
   | isSimpleReferenceStart ns el = return [RefStart] : elemToReference ns el : elemHandler ns els elemToReference
 elemHandler ns (el:els) _
-  | isSimpleReferenceEnd ns el = return [RefEnd] : elemToBodyParts ns el : elemHandler ns els elemToBodyParts -- Processing the ending tag to prevent any loss of data, probably unnecessary
+  | isSimpleReferenceEnd ns el = elemToBodyParts ns el : return [RefEnd] : elemHandler ns els elemToBodyParts -- Processing the ending tag to prevent any loss of data, probably unnecessary
 elemHandler ns (el:els) handler = handler ns el : elemHandler ns els handler
 elemHandler _ [] _ = []
 
@@ -709,6 +751,9 @@ expandDrawingId s = do
         Just bs -> return (filepath, bs)
         Nothing -> throwError DocxError
     Nothing -> throwError DocxError
+
+-- elemToExtractedParPart :: NameSpaces -> Element -> Either (D ParPart) (D BodyPart)
+-- treat nested sdt tags as body parts instead of as paragraph parts to allow for catching Word-native references
 
 elemToParParts :: NameSpaces -> Element -> D [ParPart]
 elemToParParts ns element
