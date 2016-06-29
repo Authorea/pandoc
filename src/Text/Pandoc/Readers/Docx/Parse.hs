@@ -70,8 +70,6 @@ import Text.TeXMath (Exp)
 import Text.Pandoc.Readers.Docx.Util
 import Data.Char (readLitChar, ord, chr, isDigit)
 
-import Debug.Trace
-
 data ReaderEnv = ReaderEnv { envNotes         :: Notes
                            , envNumbering     :: Numbering
                            , envRelationships :: [Relationship]
@@ -113,14 +111,6 @@ mapD f xs =
   let handler x = (f x >>= (\y-> return [y])) `catchError` (\_ -> return [])
   in
    concatMapM handler xs
-
--- Does mapD over a function that returns a D list. Not sure if this is the
--- most idiomatic way to do this.
---mapDList :: (a -> [D b]) -> [a] -> D [b]
---mapDList f xs =
---  let handler x = map (\y-> return [y]) `catchError` (\_ -> return [])) (f x)
---  in
---   concatMapM handler xs
 
 data Docx = Docx Document
           deriving Show
@@ -306,9 +296,6 @@ addinList =
     " BIBLIOGRAPHY "
   ]
 
-wordReferenceIdentifier :: String
-wordReferenceIdentifier = " BIBLIOGRAPHY "
-
 -- Returns true if the given element is the first entry in a (simple) addin
 -- (i.e. contains an r.instrText with contents "ADDIN ZOTERO_BIBL ... ") or
 -- the first entry in a Word-produced bibliography
@@ -321,18 +308,6 @@ isSimpleReferenceStart ns element | isElem ns "w" "p" element =
   where
     rList = findChildren (elemName ns "w" "r") element
     strs = concatMap (\el -> maybe [] (return . strContent) (findChild (elemName ns "w" "instrText") el)) rList
-isSimpleReferenceStart ns element | isElem ns "w" "sdt" element =
-  case strs of
-    []    -> False
-    str:_ -> str == wordReferenceIdentifier
-  where
-    sdtParagraphs = maybe [] id $ do -- flattens one layer of sdt wrapping
-      sdtContent <- findChild (elemName ns "w" "sdtContent") element
-      sdtNested <- findChild (elemName ns "w" "sdt") sdtContent
-      sdtNestedContent <- findChild (elemName ns "w" "sdtContent") sdtNested
-      return $ findChildren (elemName ns "w" "p") `concatMap` [sdtContent, sdtNestedContent]
-    rList = concatMap (findChildren (elemName ns "w" "r")) sdtParagraphs
-    strs = concatMap (\el -> maybe [] (return . strContent) (findChild (elemName ns "w" "instrText") el)) rList
 isSimpleReferenceStart _ _ = False
 
 -- Returns true if the given element is the "endmarker" of a simple reference addin
@@ -343,20 +318,6 @@ isSimpleReferenceEnd ns element | isElem ns "w" "p" element =
     r <- findChild (elemName ns "w" "r") element
     fldChar <- findChild (elemName ns "w" "fldChar") r
     findAttr (elemName ns "w" "fldCharType") fldChar
-isSimpleReferenceEnd ns element
-  | isElem ns "w" "sdt" element
-  , Just sdtContent <- findChild (elemName ns "w" "sdtContent") element =
-    any (maybe False ((==) "end")) $ map getFldCharType $ (trace (show $ pList sdtContent) $ pList sdtContent)
-    where
-      getFldCharType el = do
-        r <- findChild (elemName ns "w" "r") el
-        fldChar <- findChild (elemName ns "w" "fldChar") r
-        findAttr (elemName ns "w" "fldCharType") fldChar
-      pList sdtContent =
-        elChildren sdtContent ++
-        elChildren `concatMap`
-        (findChildren (elemName ns "w" "sdtContent") `concatMap`
-        findChildren (elemName ns "w" "sdt") sdtContent)
 isSimpleReferenceEnd _ _ = False
 
 elemToBody :: NameSpaces -> Element -> D Body
@@ -364,7 +325,7 @@ elemToBody ns element | isElem ns "w" "body" element =
   sequence (map (flip catchError (\_ -> return [])) (elemHandler ns elements elemToBodyParts)) >>=
     return . Body . concat
   where
-    elements = sdtFlatten `concatMap` (sdtFlatten `concatMap` (elChildren element)) -- TODO: Modify this to flatten for sdt
+    elements = sdtFlatten `concatMap` (sdtFlatten `concatMap` (elChildren element))
     sdtFlatten el
       | isElem ns "w" "sdt" el
       , Just sdtContent <- findChild (elemName ns "w" "sdtContent") el = elChildren sdtContent
@@ -372,9 +333,6 @@ elemToBody ns element | isElem ns "w" "body" element =
 elemToBody _ _ = throwError WrongElem
 
 elemHandler :: NameSpaces -> [Element] -> (NameSpaces -> Element -> D [BodyPart]) -> [D [BodyPart]]
--- elemHandler ns (el:els) _
---   | isSimpleReferenceStart ns el,
---     isSimpleReferenceEnd ns el = return [RefStart] : elemToReference ns el : return [RefEnd] : elemHandler ns els elemToReference
 elemHandler ns (el:els) _
   | isSimpleReferenceStart ns el = return [RefStart] : elemToReference ns el : elemHandler ns els elemToReference
 elemHandler ns (el:els) _
@@ -705,11 +663,6 @@ elemToBodyParts ns element
          return $ [ListItem parstyle numId lvl levelInfo parparts]
        Nothing -> return $ [Paragraph parstyle parparts]
 elemToBodyParts ns element
-  | isElem ns "w" "sdt" element
-  , Just sdtContent <- findChild (elemName ns "w" "sdtContent") element = do
-    bodyparts <- mapD (elemToBodyParts ns) (elChildren sdtContent)
-    return $ concat bodyparts
-elemToBodyParts ns element
   | isElem ns "w" "tbl" element = do
     let caption' = findChild (elemName ns "w" "tblPr") element
                    >>= findChild (elemName ns "w" "tblCaption")
@@ -751,9 +704,6 @@ expandDrawingId s = do
         Just bs -> return (filepath, bs)
         Nothing -> throwError DocxError
     Nothing -> throwError DocxError
-
--- elemToExtractedParPart :: NameSpaces -> Element -> Either (D ParPart) (D BodyPart)
--- treat nested sdt tags as body parts instead of as paragraph parts to allow for catching Word-native references
 
 elemToParParts :: NameSpaces -> Element -> D [ParPart]
 elemToParParts ns element
@@ -818,10 +768,6 @@ elemToParParts ns element
 elemToParParts ns element
   | isElem ns "m" "oMath" element =
     (eitherToD $ readOMML $ showElement element) >>= (return . return . PlainOMath)
-elemToParParts ns element
-  | isElem ns "w" "sdt" element
-  , Just sdtContent <- findChild (elemName ns "w" "sdtContent") element = do
-    concat `liftM` mapD (elemToParParts ns) (elChildren sdtContent)
 -- TODO: Add function case that uses findAttr in the guard to catch the EndNote tag, try to
 -- manipulate contents to produce citation of some sort. Maybe call anystyle from here?
 elemToParParts _ _ = throwError WrongElem
@@ -896,8 +842,7 @@ getParStyleField _ _ _ = Nothing
 
 elemToParagraphStyle :: NameSpaces -> Element -> ParStyleMap -> ParagraphStyle
 elemToParagraphStyle ns element sty
-  | Just pPr <- findChild (elemName ns "w" "pPr") element `mplus`
-                findChild (elemName ns "w" "sdtPr") element = -- TODO: sdtPr here might not be doing anything, since the sdt case doesn't handle styling
+  | Just pPr <- findChild (elemName ns "w" "pPr") element =
     let style =
           mapMaybe
           (findAttr (elemName ns "w" "val"))
@@ -1005,8 +950,7 @@ getBlockQuote _ _ = Nothing
 
 getNumInfo :: NameSpaces -> Element -> Maybe (String, String)
 getNumInfo ns element = do
-  let numPr = findChild (elemName ns "w" "pPr") element `mplus`
-              findChild (elemName ns "w" "sdtPr") element >>= -- TODO: sdtPr here might not be doing anything, since the sdt case doesn't handle styling
+  let numPr = findChild (elemName ns "w" "pPr") element >>=
               findChild (elemName ns "w" "numPr")
       lvl = fromMaybe "0" (numPr >>=
                            findChild (elemName ns "w" "ilvl") >>=
