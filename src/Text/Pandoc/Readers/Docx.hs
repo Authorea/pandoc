@@ -97,6 +97,8 @@ import qualified Data.Sequence as Seq (null)
 import Text.Pandoc.Error
 import Text.Pandoc.Compat.Except
 
+import Debug.Trace
+
 readDocx :: ReaderOptions
          -> B.ByteString
          -> Either PandocError (Pandoc, MediaBag)
@@ -304,6 +306,9 @@ runToInlines (InlineDrawing fp bs ext) = do
   mediaBag <- gets docxMediaBag
   modify $ \s -> s { docxMediaBag = insertMedia fp Nothing bs mediaBag }
   return $ imageWith (extentToAttr ext) fp "" ""
+runToInlines (FootnoteCitation run) = trace (show run) $ do
+  fn <- runToInlines run
+  return $ cite [] fn
 
 extentToAttr :: Extent -> Attr
 extentToAttr (Just (w, h)) =
@@ -370,6 +375,8 @@ parPartToInlines (ExternalHyperLink target runs) = do
 parPartToInlines (PlainOMath exps) = do
   -- return $ spanWith ("inline_math", [], []) (fromList [Str "test_string"])
   return $ math $ writeTeX exps
+parPartToInlines (RunCitation run runs) = do
+  return mempty
 -- TODO: Insert code to convert parsed Docx citation to Pandoc citation
 
 isAnchorSpan :: Inline -> Bool

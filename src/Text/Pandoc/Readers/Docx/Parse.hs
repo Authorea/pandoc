@@ -70,6 +70,8 @@ import Text.TeXMath (Exp)
 import Text.Pandoc.Readers.Docx.Util
 import Data.Char (readLitChar, ord, chr, isDigit)
 
+import Debug.Trace
+
 data ReaderEnv = ReaderEnv { envNotes         :: Notes
                            , envNumbering     :: Numbering
                            , envRelationships :: [Relationship]
@@ -185,8 +187,6 @@ data BodyPart = Paragraph ParagraphStyle [ParPart]
               | Reference [BodyPart]
               | RefStart
               | RefEnd
--- TODO: Tentative definition, think about this more
-
               deriving Show
 
 type TblGrid = [Integer]
@@ -214,15 +214,14 @@ data ParPart = PlainRun Run
              | ExternalHyperLink URL [Run]
              | Drawing FilePath B.ByteString Extent
              | PlainOMath [Exp]
-             -- | Citation Run
--- TODO: Tentative definition, doesn't seem completely in keeping with the format used, but
--- the new parser should only need a run, since no inference should really be done at this stage
+             | RunCitation ParPart [ParPart]
              deriving Show
 
 data Run = Run RunStyle [RunElem]
          | Footnote [BodyPart]
          | Endnote [BodyPart]
          | InlineDrawing FilePath B.ByteString Extent
+         | FootnoteCitation Run
            deriving Show
 
 data RunElem = TextRun String | LnBrk | Tab | SoftHyphen | NoBreakHyphen
@@ -285,8 +284,8 @@ archiveToDocument zf = do
   body <- elemToBody namespaces bodyElem
   return $ Document namespaces body
 
-addinList :: [String]
-addinList =
+addinRefList :: [String]
+addinRefList =
   [
     " ADDIN ZOTERO_BIBL {\"custom\":[]} CSL_BIBLIOGRAPHY ",
     "ADDIN Mendeley Bibliography CSL_BIBLIOGRAPHY ",
@@ -294,6 +293,17 @@ addinList =
     "ADDIN F1000_CSL_BIBLIOGRAPHY",
     " ADDIN PAPERS2_CITATIONS <papers2_bibliography/>",
     " BIBLIOGRAPHY "
+  ]
+
+addinCiteList :: [String]
+addinCiteList =
+  [
+    " ADDIN ZOTERO_ITEM CSL_CITATION",
+    "ADDIN CSL_CITATION",
+    "ADDIN EN.CITE",
+    "ADDIN F1000_CSL_CITATION",
+    " ADDIN PAPERS2_CITATIONS",
+    "CITATION"
   ]
 
 -- Returns true if the given element is the first entry in a (simple) addin
@@ -304,25 +314,51 @@ isSimpleReferenceStart :: NameSpaces -> Element -> Bool
 isSimpleReferenceStart ns element | isElem ns "w" "p" element =
   case strs of
     []    -> False
-    str:_ -> any ((==) str) addinList
+    str:_ -> any ((==) str) addinRefList
   where
     rList = findChildren (elemName ns "w" "r") element
     strs = concatMap (\el -> maybe [] (return . strContent) (findChild (elemName ns "w" "instrText") el)) rList
 isSimpleReferenceStart _ _ = False
 
+-- Checks whether the given tag is a closing fldChar tag
+isFldCharEnd :: NameSpaces -> Element -> Bool
+isFldCharEnd ns element | isElem ns "w" "r" element =
+  maybe False ( (==) "end") $ do                 -- TODO: more idiomatic way to do this?
+    fldChar <- findChild (elemName ns "w" "fldChar") element
+    findAttr (elemName ns "w" "fldCharType") fldChar
+isFldCharEnd _ _ = False
+
 -- Returns true if the given element is the "endmarker" of a simple reference addin
 -- (i.e. a p.r.fldChar with attribute fldCharType = "end")
 isSimpleReferenceEnd :: NameSpaces -> Element -> Bool
-isSimpleReferenceEnd ns element | isElem ns "w" "p" element =
-  maybe False ( (==) "end") $ do                 -- TODO: more idiomatic way to do this?
-    r <- findChild (elemName ns "w" "r") element
-    fldChar <- findChild (elemName ns "w" "fldChar") r
-    findAttr (elemName ns "w" "fldCharType") fldChar
+isSimpleReferenceEnd ns element
+  | isElem ns "w" "p" element
+  , Just r <- findChild (elemName ns "w" "r") element =
+  isFldCharEnd ns r
 isSimpleReferenceEnd _ _ = False
+
+-- Returns true if the given footnote element represents a citation
+-- (i.e. contains an r.instrText whose contents begin with "ADDIN ZOTERO_BIBL ... ")
+isAddinCitation :: NameSpaces -> Element -> Bool
+isAddinCitation ns element
+  | isElem ns "w" "footnote" element
+  , Just par <- findChild (elemName ns "w" "p") element =
+    case strs par of
+      []    -> False
+      str:_ -> any (\ addin -> take (length addin) str == addin) addinCiteList -- trace str $ any (\ addin -> take (length addin) str == addin) addinCiteList
+  where
+    rList par = findChildren (elemName ns "w" "r") par
+    strs par = concatMap (\el -> maybe [] (return . strContent) (findChild (elemName ns "w" "instrText") el)) $ rList par
+    -- TODO: possibly change to a recursive call to isAddinCitation, or separate logic into a new function
+isAddinCitation ns element
+  | isElem ns "w" "r" element
+  , Just instrText <- findChild (elemName ns "w" "instrText") element =
+      trace (strContent instrText ++ "\n") $ any (\ addin -> take (length addin) (strContent instrText) == addin) addinCiteList
+isAddinCitation _ _ = False
 
 elemToBody :: NameSpaces -> Element -> D Body
 elemToBody ns element | isElem ns "w" "body" element =
-  sequence (map (flip catchError (\_ -> return [])) (elemHandler ns elements elemToBodyParts)) >>=
+  sequence (map (flip catchError (\_ -> return [])) (elemToBodyHandler ns elements elemToBodyParts)) >>=
     return . Body . concat
   where
     elements = sdtFlatten `concatMap` (sdtFlatten `concatMap` (elChildren element))
@@ -332,13 +368,13 @@ elemToBody ns element | isElem ns "w" "body" element =
     sdtFlatten el = [el]
 elemToBody _ _ = throwError WrongElem
 
-elemHandler :: NameSpaces -> [Element] -> (NameSpaces -> Element -> D [BodyPart]) -> [D [BodyPart]]
-elemHandler ns (el:els) _
-  | isSimpleReferenceStart ns el = return [RefStart] : elemToReference ns el : elemHandler ns els elemToReference
-elemHandler ns (el:els) _
-  | isSimpleReferenceEnd ns el = elemToBodyParts ns el : return [RefEnd] : elemHandler ns els elemToBodyParts -- Processing the ending tag to prevent any loss of data, probably unnecessary
-elemHandler ns (el:els) handler = handler ns el : elemHandler ns els handler
-elemHandler _ [] _ = []
+elemToBodyHandler :: NameSpaces -> [Element] -> (NameSpaces -> Element -> D [BodyPart]) -> [D [BodyPart]]
+elemToBodyHandler ns (el:els) _
+  | isSimpleReferenceStart ns el = return [RefStart] : elemToReference ns el : elemToBodyHandler ns els elemToReference
+elemToBodyHandler ns (el:els) _
+  | isSimpleReferenceEnd ns el = elemToBodyParts ns el : return [RefEnd] : elemToBodyHandler ns els elemToBodyParts -- Processing the ending tag to prevent any loss of data, probably unnecessary
+elemToBodyHandler ns (el:els) handler = handler ns el : elemToBodyHandler ns els handler
+elemToBodyHandler _ [] _ = []
 
 archiveToStyles :: Archive -> (CharStyleMap, ParStyleMap)
 archiveToStyles zf =
@@ -645,17 +681,15 @@ elemToBodyParts ns element
   , Just (numId, lvl) <- getNumInfo ns element = do
     sty <- asks envParStyles
     let parstyle = elemToParagraphStyle ns element sty
-    parparts <- concat `liftM` mapD (elemToParParts ns) (elChildren element)
+    parparts <- sequence $ elemToParPartHandler ns (elChildren element) Nothing
     num <- asks envNumbering
     let levelInfo = lookupLevel numId lvl num
     return $ [ListItem parstyle numId lvl levelInfo parparts]
 elemToBodyParts ns element
   | isElem ns "w" "p" element = do
-      -- (asks envParStyles) :: Reader ReaderEnv ParStyleMap
-      -- sty :: ParStyleMap
       sty <- asks envParStyles
       let parstyle = elemToParagraphStyle ns element sty
-      parparts <- concat `liftM` mapD (elemToParParts ns) (elChildren element)
+      parparts <- sequence $ elemToParPartHandler ns (elChildren element) Nothing
       case pNumInfo parstyle of
        Just (numId, lvl) -> do
          num <- asks envNumbering
@@ -705,8 +739,28 @@ expandDrawingId s = do
         Nothing -> throwError DocxError
     Nothing -> throwError DocxError
 
-elemToParParts :: NameSpaces -> Element -> D [ParPart]
-elemToParParts ns element
+-- Converts an element to a RunCitation
+elemToCitation :: NameSpaces -> Element -> D ParPart
+elemToCitation _ _ = return . PlainRun $ Run defaultRunStyle [TextRun "***** citation data *****"]
+
+-- Bool represents whether current content is a citation or not
+elemToParPartHandler :: NameSpaces -> [Element] -> Maybe (D ParPart, [D ParPart]) -> [D ParPart]
+elemToParPartHandler ns (el:els) Nothing
+  | isAddinCitation ns el = trace "Identified Citation!" $ elemToParPartHandler ns els $ Just (elemToParPart ns el, [])
+elemToParPartHandler ns (el:els) Nothing = trace "No Citation" $ elemToParPart ns el : elemToParPartHandler ns els Nothing
+elemToParPartHandler ns (el:els) (Just (ct, cttext))
+  | isFldCharEnd ns el =
+      runCitation : elemToParPartHandler ns els Nothing -- Processing the ending tag to prevent any loss of data, probably unnecessary
+    where
+      runCitation = do
+        citation <- ct
+        citetext <- sequence cttext
+        return $ RunCitation citation citetext
+elemToParPartHandler ns (el:els) (Just (ct, cttext)) = elemToParPartHandler ns els $ Just (ct, cttext ++ [elemToParPart ns el])
+elemToParPartHandler _ [] _ = []
+
+elemToParPart :: NameSpaces -> Element -> D ParPart
+elemToParPart ns element
   | isElem ns "w" "r" element
   , Just drawingElem <- findChild (elemName ns "w" "drawing") element =
     let a_ns = "http://schemas.openxmlformats.org/drawingml/2006/main"
@@ -714,41 +768,41 @@ elemToParParts ns element
                   >>= findAttr (QName "embed" (lookup "r" ns) (Just "r"))
     in
      case drawing of
-       Just s -> expandDrawingId s >>= (\(fp, bs) -> return [Drawing fp bs $ elemToExtent drawingElem])
+       Just s -> expandDrawingId s >>= (\(fp, bs) -> return $ Drawing fp bs $ elemToExtent drawingElem)
        Nothing -> throwError WrongElem
 -- The below is an attempt to deal with images in deprecated vml format.
-elemToParParts ns element
+elemToParPart ns element
   | isElem ns "w" "r" element
   , Just _ <- findChild (elemName ns "w" "pict") element =
     let drawing = findElement (elemName ns "v" "imagedata") element
                   >>= findAttr (elemName ns "r" "id")
     in
      case drawing of
-       Just s -> expandDrawingId s >>= (\(fp, bs) -> return [Drawing fp bs Nothing])
+       Just s -> expandDrawingId s >>= (\(fp, bs) -> return $ Drawing fp bs Nothing)
        Nothing -> throwError WrongElem
-elemToParParts ns element
+elemToParPart ns element
   | isElem ns "w" "r" element =
-    elemToRun ns element >>= (\r -> return [PlainRun r])
-elemToParParts ns element
+    elemToRun ns element >>= (\r -> return $ PlainRun r)
+elemToParPart ns element
   | isElem ns "w" "ins" element
   , Just cId <- findAttr (elemName ns "w" "id") element
   , Just cAuthor <- findAttr (elemName ns "w" "author") element
   , Just cDate <- findAttr (elemName ns "w" "date") element = do
     runs <- mapD (elemToRun ns) (elChildren element)
-    return [Insertion cId cAuthor cDate runs]
-elemToParParts ns element
+    return $ Insertion cId cAuthor cDate runs
+elemToParPart ns element
   | isElem ns "w" "del" element
   , Just cId <- findAttr (elemName ns "w" "id") element
   , Just cAuthor <- findAttr (elemName ns "w" "author") element
   , Just cDate <- findAttr (elemName ns "w" "date") element = do
     runs <- mapD (elemToRun ns) (elChildren element)
-    return [Deletion cId cAuthor cDate runs]
-elemToParParts ns element
+    return $ Deletion cId cAuthor cDate runs
+elemToParPart ns element
   | isElem ns "w" "bookmarkStart" element
   , Just bmId <- findAttr (elemName ns "w" "id") element
   , Just bmName <- findAttr (elemName ns "w" "name") element =
-    return [BookMark bmId bmName]
-elemToParParts ns element
+    return $ BookMark bmId bmName
+elemToParPart ns element
   | isElem ns "w" "hyperlink" element
   , Just relId <- findAttr (elemName ns "r" "id") element = do
     location <- asks envLocation
@@ -757,20 +811,20 @@ elemToParParts ns element
     case lookupRelationship location relId rels of
       Just target -> do
          case findAttr (elemName ns "w" "anchor") element of
-             Just anchor -> return [ExternalHyperLink (target ++ '#':anchor) runs]
-             Nothing -> return [ExternalHyperLink target runs]
-      Nothing     -> return [ExternalHyperLink "" runs]
-elemToParParts ns element
+             Just anchor -> return $ ExternalHyperLink (target ++ '#':anchor) runs
+             Nothing -> return $ ExternalHyperLink target runs
+      Nothing     -> return $ ExternalHyperLink "" runs
+elemToParPart ns element
   | isElem ns "w" "hyperlink" element
   , Just anchor <- findAttr (elemName ns "w" "anchor") element = do
     runs <- mapD (elemToRun ns) (elChildren element)
-    return [InternalHyperLink anchor runs]
-elemToParParts ns element
+    return $ InternalHyperLink anchor runs
+elemToParPart ns element
   | isElem ns "m" "oMath" element =
-    (eitherToD $ readOMML $ showElement element) >>= (return . return . PlainOMath)
+    (eitherToD $ readOMML $ showElement element) >>= (return . PlainOMath)
 -- TODO: Add function case that uses findAttr in the guard to catch the EndNote tag, try to
 -- manipulate contents to produce citation of some sort. Maybe call anystyle from here?
-elemToParParts _ _ = throwError WrongElem
+elemToParPart _ _ = throwError WrongElem
 
 lookupFootnote :: String -> Notes -> Maybe Element
 lookupFootnote s (Notes _ fns _) = fns >>= (M.lookup s)
@@ -806,8 +860,11 @@ elemToRun ns element
   , Just fnId <- findAttr (elemName ns "w" "id") ref = do
     notes <- asks envNotes
     case lookupFootnote fnId notes of
-      Just e -> do bps <- local (\r -> r {envLocation=InFootnote}) $ mapD (elemToBodyParts ns) (elChildren e) >>= (return . concat)
-                   return $ Footnote bps
+      Just e -> do
+                  bps <- local (\r -> r {envLocation=InFootnote}) $ mapD (elemToBodyParts ns) (elChildren e) >>= (return . concat)
+                  if isAddinCitation ns e
+                    then return $ FootnoteCitation $ Footnote bps
+                    else return $ Footnote bps
       Nothing  -> return $ Footnote []
 elemToRun ns element
   | isElem ns "w" "r" element
