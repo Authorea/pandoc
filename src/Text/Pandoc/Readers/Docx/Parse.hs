@@ -70,8 +70,6 @@ import Text.TeXMath (Exp)
 import Text.Pandoc.Readers.Docx.Util
 import Data.Char (readLitChar, ord, chr, isDigit)
 
-import Debug.Trace
-
 data ReaderEnv = ReaderEnv { envNotes         :: Notes
                            , envNumbering     :: Numbering
                            , envRelationships :: [Relationship]
@@ -214,14 +212,14 @@ data ParPart = PlainRun Run
              | ExternalHyperLink URL [Run]
              | Drawing FilePath B.ByteString Extent
              | PlainOMath [Exp]
-             | RunCitation ParPart [ParPart]
+             | RunCitation String [ParPart] -- The string represents the citation data JSON
              deriving Show
 
 data Run = Run RunStyle [RunElem]
          | Footnote [BodyPart]
          | Endnote [BodyPart]
          | InlineDrawing FilePath B.ByteString Extent
-         | FootnoteCitation Run
+         | FootnoteCitation String Run -- The string represents the citation data JSON
            deriving Show
 
 data RunElem = TextRun String | LnBrk | Tab | SoftHyphen | NoBreakHyphen
@@ -338,14 +336,18 @@ isSimpleReferenceEnd ns element
 isSimpleReferenceEnd _ _ = False
 
 -- Returns true if the given footnote element represents a citation
+-- or if if the given run represents the start of a citation.
 -- (i.e. contains an r.instrText whose contents begin with "ADDIN ZOTERO_BIBL ... ")
-isAddinCitation :: NameSpaces -> Element -> Bool
+isAddinCitation :: NameSpaces -> Element -> Maybe String
 isAddinCitation ns element
   | isElem ns "w" "footnote" element
   , Just par <- findChild (elemName ns "w" "p") element =
     case strs par of
-      []    -> False
-      str:_ -> any (\ addin -> take (length addin) str == addin) addinCiteList -- trace str $ any (\ addin -> take (length addin) str == addin) addinCiteList
+      []    -> Nothing
+      str:_ ->
+        if any (\ addin -> take (length addin) str == addin) addinCiteList
+          then Just str
+          else Nothing
   where
     rList par = findChildren (elemName ns "w" "r") par
     strs par = concatMap (\el -> maybe [] (return . strContent) (findChild (elemName ns "w" "instrText") el)) $ rList par
@@ -353,8 +355,11 @@ isAddinCitation ns element
 isAddinCitation ns element
   | isElem ns "w" "r" element
   , Just instrText <- findChild (elemName ns "w" "instrText") element =
-      trace (strContent instrText ++ "\n") $ any (\ addin -> take (length addin) (strContent instrText) == addin) addinCiteList
-isAddinCitation _ _ = False
+      let str = strContent instrText in
+      if any (\ addin -> take (length addin) str == addin) addinCiteList
+        then Just str
+        else Nothing
+isAddinCitation _ _ = Nothing
 
 elemToBody :: NameSpaces -> Element -> D Body
 elemToBody ns element | isElem ns "w" "body" element =
@@ -681,7 +686,7 @@ elemToBodyParts ns element
   , Just (numId, lvl) <- getNumInfo ns element = do
     sty <- asks envParStyles
     let parstyle = elemToParagraphStyle ns element sty
-    parparts <- sequence $ elemToParPartHandler ns (elChildren element) Nothing
+    parparts <- elemToParPartHandler ns (elChildren element) Nothing
     num <- asks envNumbering
     let levelInfo = lookupLevel numId lvl num
     return $ [ListItem parstyle numId lvl levelInfo parparts]
@@ -689,7 +694,7 @@ elemToBodyParts ns element
   | isElem ns "w" "p" element = do
       sty <- asks envParStyles
       let parstyle = elemToParagraphStyle ns element sty
-      parparts <- sequence $ elemToParPartHandler ns (elChildren element) Nothing
+      parparts <- elemToParPartHandler ns (elChildren element) Nothing
       case pNumInfo parstyle of
        Just (numId, lvl) -> do
          num <- asks envNumbering
@@ -719,7 +724,7 @@ elemToBodyParts _ _ = throwError WrongElem
 
 elemToReference :: NameSpaces -> Element -> D [BodyPart]
 elemToReference ns element =
-  elemToBodyParts ns element >>= return . return . Reference -- D_return . List_return
+  elemToBodyParts ns element >>= \ x -> return . return . Reference $ x -- D_return . List_return
 
 lookupRelationship :: DocumentLocation -> RelId -> [Relationship] -> Maybe Target
 lookupRelationship docLocation relid rels =
@@ -739,25 +744,24 @@ expandDrawingId s = do
         Nothing -> throwError DocxError
     Nothing -> throwError DocxError
 
--- Converts an element to a RunCitation
-elemToCitation :: NameSpaces -> Element -> D ParPart
-elemToCitation _ _ = return . PlainRun $ Run defaultRunStyle [TextRun "***** citation data *****"]
+blankParPart :: ParPart
+blankParPart = PlainRun $ Run defaultRunStyle []
 
--- Bool represents whether current content is a citation or not
-elemToParPartHandler :: NameSpaces -> [Element] -> Maybe (D ParPart, [D ParPart]) -> [D ParPart]
+elemToParPartHandler :: NameSpaces -> [Element] -> Maybe (String, D [ParPart]) -> D [ParPart]
 elemToParPartHandler ns (el:els) Nothing
-  | isAddinCitation ns el = trace "Identified Citation!" $ elemToParPartHandler ns els $ Just (elemToParPart ns el, [])
-elemToParPartHandler ns (el:els) Nothing = trace "No Citation" $ elemToParPart ns el : elemToParPartHandler ns els Nothing
-elemToParPartHandler ns (el:els) (Just (ct, cttext))
-  | isFldCharEnd ns el =
-      runCitation : elemToParPartHandler ns els Nothing -- Processing the ending tag to prevent any loss of data, probably unnecessary
-    where
-      runCitation = do
-        citation <- ct
-        citetext <- sequence cttext
-        return $ RunCitation citation citetext
-elemToParPartHandler ns (el:els) (Just (ct, cttext)) = elemToParPartHandler ns els $ Just (ct, cttext ++ [elemToParPart ns el])
-elemToParPartHandler _ [] _ = []
+  | Just citestr <- isAddinCitation ns el = elemToParPartHandler ns els $ Just (citestr, liftM return $ elemToParPart ns el)
+elemToParPartHandler ns (el:els) Nothing = do
+  parpart <- elemToParPart ns el `catchError` (\ _ -> return $ blankParPart)
+  parparts <- elemToParPartHandler ns els Nothing
+  return $ parpart : parparts
+elemToParPartHandler ns (el:els) (Just (citestr, cttext))
+  | isFldCharEnd ns el = do
+      citetext <- cttext
+      parparts <- elemToParPartHandler ns els Nothing
+      return $ (RunCitation citestr citetext) : parparts
+elemToParPartHandler ns (el:els) (Just (citestr, cttext)) = elemToParPartHandler ns els citations
+  where citations = Just (citestr, liftM2 (++) cttext (liftM return $ elemToParPart ns el `catchError` (\ _ -> return $ blankParPart)))
+elemToParPartHandler _ [] _ = return []
 
 elemToParPart :: NameSpaces -> Element -> D ParPart
 elemToParPart ns element
@@ -862,9 +866,9 @@ elemToRun ns element
     case lookupFootnote fnId notes of
       Just e -> do
                   bps <- local (\r -> r {envLocation=InFootnote}) $ mapD (elemToBodyParts ns) (elChildren e) >>= (return . concat)
-                  if isAddinCitation ns e
-                    then return $ FootnoteCitation $ Footnote bps
-                    else return $ Footnote bps
+                  case isAddinCitation ns e of
+                    Just citestr -> return $ FootnoteCitation citestr $ Footnote bps
+                    Nothing      -> return $ Footnote bps
       Nothing  -> return $ Footnote []
 elemToRun ns element
   | isElem ns "w" "r" element
