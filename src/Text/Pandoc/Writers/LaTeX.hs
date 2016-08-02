@@ -820,6 +820,7 @@ inlineToLaTeX (Span (id',classes,kvs) ils) = do
   let noSmallCaps = "csl-no-smallcaps" `elem` classes
   let rtl = ("dir","rtl") `elem` kvs
   let ltr = ("dir","ltr") `elem` kvs
+  let citecommand = if ("wordfootnotecitation" `elem` classes) then "\\wordfootnotecite" else "\\wordruncite"
   ref <- toLabel id'
   let linkAnchor = if null id'
                       then empty
@@ -835,7 +836,10 @@ inlineToLaTeX (Span (id',classes,kvs) ils) = do
         Just lng -> let (l, o) = toPolyglossia $ splitBy (=='-') lng
                         ops = if null o then "" else brackets (text o)
                     in  \c -> char '\\' <> "text" <> text l <> ops <> braces c
-        Nothing  -> id)
+        Nothing  -> id) .
+     (case lookup "citation_data" kvs of
+        Just citedata -> \ citation -> citecommand <> braces (text citedata) <> braces citation
+        Nothing -> id)
     ) `fmap` inlineListToLaTeX ils
 inlineToLaTeX (Emph lst) =
   inlineListToLaTeX lst >>= return . inCmd "emph"

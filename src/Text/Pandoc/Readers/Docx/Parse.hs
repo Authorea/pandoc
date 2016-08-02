@@ -867,7 +867,7 @@ elemToRun ns element
       Just e -> do
                   bps <- local (\r -> r {envLocation=InFootnote}) $ mapD (elemToBodyParts ns) (elChildren e) >>= (return . concat)
                   case isAddinCitation ns e of
-                    Just citestr -> return $ FootnoteCitation citestr $ Footnote bps
+                    Just citestr -> return $ FootnoteCitation citestr $ Footnote bps -- TODO may be unnecessary extra information
                     Nothing      -> return $ Footnote bps
       Nothing  -> return $ Footnote []
 elemToRun ns element
