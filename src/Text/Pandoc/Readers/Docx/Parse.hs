@@ -212,7 +212,8 @@ data ParPart = PlainRun Run
              | ExternalHyperLink URL [Run]
              | Drawing FilePath B.ByteString Extent
              | PlainOMath [Exp]
-             | RunCitation String [ParPart] -- The string represents the citation data JSON
+             | RunCitation String [ParPart] -- The string represents the citation data JSON/XML
+             | WordCitation String [Run] -- This represents citations produced by Word's inbuilt citation manager
              deriving Show
 
 data Run = Run RunStyle [RunElem]
@@ -301,7 +302,7 @@ addinCiteList =
     " ADDIN EN.CITE",
     "ADDIN F1000_CSL_CITATION",
     " ADDIN PAPERS2_CITATIONS",
-    "CITATION"
+    " CITATION"
   ]
 
 -- Returns true if the given element is the first entry in a (simple) addin
@@ -826,6 +827,16 @@ elemToParPart ns element
 elemToParPart ns element
   | isElem ns "m" "oMath" element =
     (eitherToD $ readOMML $ showElement element) >>= (return . PlainOMath)
+elemToParPart ns element
+  | isElem ns "w" "sdt" element
+  , Just sdtContent <- findChild (elemName ns "w" "sdtContent") element =
+      let rlist = findChildren (elemName ns "w" "r") sdtContent in
+      case mapMaybe (isAddinCitation ns) rlist of
+        citestr:_ ->
+          (mapD (elemToRun ns) $ findChildren (elemName ns "w" "r") sdtContent) >>=
+          return . WordCitation citestr
+        [] -> throwError WrongElem
+
 -- TODO: Add function case that uses findAttr in the guard to catch the EndNote tag, try to
 -- manipulate contents to produce citation of some sort. Maybe call anystyle from here?
 elemToParPart _ _ = throwError WrongElem

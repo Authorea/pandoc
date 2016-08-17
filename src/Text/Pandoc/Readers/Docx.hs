@@ -376,6 +376,9 @@ parPartToInlines (PlainOMath exps) = do
 parPartToInlines (RunCitation citestr parparts) = do
   mapM parPartToInlines parparts >>= \ inlines ->
     return $ spanWith ("", ["wordruncitation"], [("citation_data", citestr)]) $ mconcat inlines
+parPartToInlines (WordCitation citestr runs) = do
+  mapM runToInlines runs >>= \ inlines ->
+    return $ spanWith ("", ["wordnativecitation"], [("citation_data", citestr)]) $ mconcat inlines
 
 isAnchorSpan :: Inline -> Bool
 isAnchorSpan (Span (_, classes, kvs) ils) =
