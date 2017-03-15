@@ -545,9 +545,25 @@ elemToRow :: NameSpaces -> Element -> D Row
 elemToRow ns element | isElem ns "w" "tr" element =
   do
     let cellElems = findChildren (elemName ns "w" "tc") element
-    cells <- mapD (elemToCell ns) cellElems
+    let unmergedCellElems = cellElems >>= unmergeCellsHorizontal ns
+    cells <- mapD (elemToCell ns) unmergedCellElems
     return $ Row cells
 elemToRow _ _ = throwError WrongElem
+
+-- replicate the element based on the value of gridSpan. This way, merged cells
+-- content will appear multiple times, but no data is lost (and details about
+-- structure of table are maintained even in formats that do not support
+-- merged cells)
+unmergeCellsHorizontal :: NameSpaces -> Element -> [Element]
+unmergeCellsHorizontal ns element
+  | Just tblCellProperties <- findChild (elemName ns "w" "tcPr") element,
+    Just mergeWidthElem <- findChild (elemName ns "w" "gridSpan") tblCellProperties =
+    let mergeWidth = findAttr (elemName ns "w" "val") mergeWidthElem >>= stringToInteger
+    in
+      case mergeWidth of
+        Just n  -> genericReplicate n element
+        Nothing -> [element] -- should this case be changed to be safer?
+unmergeCellsHorizontal _ element = [element]
 
 elemToCell :: NameSpaces -> Element -> D Cell
 elemToCell ns element | isElem ns "w" "tc" element =
@@ -690,7 +706,7 @@ elemToParPart ns element
   , Just drawingElem <- findChild (elemName ns "w" "drawing") element
   , c_ns <- "http://schemas.openxmlformats.org/drawingml/2006/chart"
   , Just _ <- findElement (QName "chart" (Just c_ns) (Just "c")) drawingElem
-  = return Chart                       
+  = return Chart
 elemToParPart ns element
   | isElem ns "w" "r" element =
     elemToRun ns element >>= (\r -> return $ PlainRun r)
