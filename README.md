@@ -1,6 +1,9 @@
 Pandoc
 ======
 
+(Authorea)
+[![travis build status](https://img.shields.io/travis/Authorea/pandoc/master.svg?label=travis+build)](https://travis-ci.org/Authorea/pandoc)
+
 [![github release](https://img.shields.io/github/release/jgm/pandoc.svg?label=current+release)](https://github.com/jgm/pandoc/releases)
 [![hackage release](https://img.shields.io/hackage/v/pandoc.svg?label=hackage)](http://hackage.haskell.org/package/pandoc)
 [![homebrew](https://img.shields.io/homebrew/v/pandoc.svg)](http://brewformulas.org/Pandoc)
