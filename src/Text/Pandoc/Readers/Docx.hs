@@ -64,13 +64,14 @@ implemented, [-] means partially implemented):
   - [X] Math
   - [X] Link (links to an arbitrary bookmark create a span with the target as
         id and "anchor" class)
-  - [X] Image 
+  - [X] Image
   - [X] Note (Footnotes and Endnotes are silently combined.)
 -}
 
 module Text.Pandoc.Readers.Docx
        ( readDocxWithWarnings
        , readDocx
+       , tt
        ) where
 
 import Codec.Archive.Zip
@@ -99,6 +100,23 @@ import Data.Traversable (traverse)
 
 import Text.Pandoc.Error
 import Control.Monad.Except
+
+u = error "my error"
+
+tt1 :: IO B.ByteString
+tt1 = B.readFile "/Users/michaelklein/Downloads/Untitleddocument.docx"
+
+-- tt2 :: IO (Either Text.Pandoc.Readers.Docx.Parse.DocxError (Docx, [String]))
+tt2 bys = blkbps
+  where
+    Right archive = toArchiveOrFail bys
+    Right (docx, _) = archiveToDocxWithWarnings archive
+    Docx (Document _ (Body body)) = docx
+    (_, blkbps) = sepBodyParts body
+  -- mapM bodyPartToBlocks blkbps
+  -- blks <- smushBlocks <$> mapM bodyPartToBlocks blkbps
+
+tt = tt2 <$> tt1
 
 readDocxWithWarnings :: ReaderOptions
                      -> B.ByteString
@@ -559,42 +577,43 @@ bodyPartToBlocks (ListItem pPr numId lvl (Just levelInfo) parparts) = do
                                    ]
   blks <- bodyPartToBlocks (Paragraph pPr parparts)
   return $ divWith ("", ["list-item"], kvs) blks
-bodyPartToBlocks (ListItem pPr _ _ _ parparts) = 
+bodyPartToBlocks (ListItem pPr _ _ _ parparts) =
   let pPr' = pPr {pStyle = "ListParagraph": (pStyle pPr)}
   in
     bodyPartToBlocks $ Paragraph pPr' parparts
-bodyPartToBlocks (Tbl _ _ _ []) =
+bodyPartToBlocks (Tbl _ _ _ _ []) =
   return $ para mempty
-bodyPartToBlocks (Tbl cap _ look (r:rs)) = do
+bodyPartToBlocks (Tbl cap _ look aligns (r:rs)) = do
   let caption = text cap
       (hdr, rows) = case firstRowFormatting look of
         True | null rs -> (Nothing, [r])
              | otherwise -> (Just r, rs)
         False -> (Nothing, r:rs)
 
-  cells <- mapM rowToBlocksList rows        
+  cells <- mapM rowToBlocksList rows
 
   let width = case cells of
         r':_ -> length r'
         -- shouldn't happen
-        []   -> 0               
+        []   -> 0
 
   hdrCells <- case hdr of
     Just r' -> rowToBlocksList r'
     Nothing -> return $ replicate width mempty
 
-      -- The two following variables (horizontal column alignment and
-      -- relative column widths) go to the default at the
-      -- moment. Width information is in the TblGrid field of the Tbl,
-      -- so should be possible. Alignment might be more difficult,
-      -- since there doesn't seem to be a column entity in docx.
-  let alignments = replicate width AlignDefault
+  let alignments = convertAlignment <$> aligns
       widths = replicate width 0 :: [Double]
 
   return $ table caption (zip alignments widths) hdrCells cells
 bodyPartToBlocks (OMathPara e) = do
   return $ para $ displayMath (writeTeX e)
 
+
+convertAlignment :: TblAlign -> Alignment
+convertAlignment TblLeft      = AlignLeft
+convertAlignment TblCenter    = AlignCenter
+convertAlignment TblRight     = AlignRight
+convertAlignment TblJustified = AlignDefault
 
 -- replace targets with generated anchors.
 rewriteLink' :: Inline -> DocxContext Inline

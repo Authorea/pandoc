@@ -35,6 +35,7 @@ module Text.Pandoc.Readers.Docx.Parse ( Docx(..)
                                       , Body(..)
                                       , BodyPart(..)
                                       , TblLook(..)
+                                      , TblAlign(..)
                                       , Extent
                                       , ParPart(..)
                                       , Run(..)
@@ -51,6 +52,7 @@ module Text.Pandoc.Readers.Docx.Parse ( Docx(..)
                                       , Cell(..)
                                       , archiveToDocx
                                       , archiveToDocxWithWarnings
+                                      , xx
                                       ) where
 import Codec.Archive.Zip
 import Text.XML.Light
@@ -71,6 +73,10 @@ import Text.TeXMath.Unicode.Fonts (getUnicode, stringToFont, Font(..))
 import Text.TeXMath (Exp)
 import Text.Pandoc.Readers.Docx.Util
 import Data.Char (readLitChar, ord, chr, isDigit)
+
+import Debug.Trace
+
+xx = findAttr
 
 data ReaderEnv = ReaderEnv { envNotes         :: Notes
                            , envComments      :: Comments
@@ -186,9 +192,18 @@ defaultParagraphStyle = ParagraphStyle { pStyle = []
 
 data BodyPart = Paragraph ParagraphStyle [ParPart]
               | ListItem ParagraphStyle String String (Maybe Level) [ParPart]
-              | Tbl String TblGrid TblLook [Row]
+              | Tbl String TblGrid TblLook [TblAlign] [Row]
               | OMathPara [Exp]
               deriving Show
+
+data TblAlign = TblLeft
+              | TblCenter
+              | TblRight
+              | TblJustified
+              deriving Show
+
+defaultTblAlign :: TblAlign
+defaultTblAlign = TblLeft
 
 type TblGrid = [Integer]
 
@@ -641,9 +656,30 @@ elemToBodyPart ns element
 
     grid <- grid'
     tblLook <- tblLook'
+    let tblAligns = getColumnAlignments ns element
     rows <- mapD (elemToRow ns) (elChildren element)
-    return $ Tbl caption grid tblLook rows
+
+    let fillMeIn = trace ("hi: \n\n\n" ++ splitShow (catMaybes $ fmap (findAttr (elemName ns "w" "val")) $ findChildren (elemName ns "w" "tr") element >>= findChildren (elemName ns "w" "tc") >>= findChildren (elemName ns "w" "p") >>= findChildren (elemName ns "w" "pPr") >>= findChildren (elemName ns "w" "jc")) ++ "\n\n\n\n\n\n\n\n") [TblJustified,TblJustified,TblJustified]
+    return $ Tbl caption grid tblLook tblAligns rows
 elemToBodyPart _ _ = throwError WrongElem
+
+getColumnAlignments :: NameSpaces -> Element -> [TblAlign]
+getColumnAlignments ns element = maybe defaultTblAlign lookupAlignments . findAttr (elemName ns "w" "val") <$> cellAlignmentAttributes
+  where
+    cellAlignmentAttributes = findChildren (elemName ns "w" "tr") element >>=
+      findChildren (elemName ns "w" "tc") >>=
+      findChildren (elemName ns "w" "p") >>=
+      findChildren (elemName ns "w" "pPr") >>=
+      findChildren (elemName ns "w" "jc")
+
+lookupAlignments :: String -> TblAlign
+lookupAlignments "left"   = TblLeft
+lookupAlignments "right"  = TblRight
+lookupAlignments "center" = TblCenter
+lookupAlignments _        = TblJustified
+
+splitShow :: Show a => [a] -> String
+splitShow = unlines . map show
 
 lookupRelationship :: DocumentLocation -> RelId -> [Relationship] -> Maybe Target
 lookupRelationship docLocation relid rels =
