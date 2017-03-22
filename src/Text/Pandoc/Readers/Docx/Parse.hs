@@ -35,6 +35,7 @@ module Text.Pandoc.Readers.Docx.Parse ( Docx(..)
                                       , Body(..)
                                       , BodyPart(..)
                                       , TblLook(..)
+                                      , TblAlign(..)
                                       , Extent
                                       , ParPart(..)
                                       , Run(..)
@@ -186,9 +187,18 @@ defaultParagraphStyle = ParagraphStyle { pStyle = []
 
 data BodyPart = Paragraph ParagraphStyle [ParPart]
               | ListItem ParagraphStyle String String (Maybe Level) [ParPart]
-              | Tbl String TblGrid TblLook [Row]
+              | Tbl String TblGrid TblLook [TblAlign] [Row]
               | OMathPara [Exp]
               deriving Show
+
+data TblAlign = TblLeft
+              | TblCenter
+              | TblRight
+              | TblJustified
+              deriving Show
+
+defaultTblAlign :: TblAlign
+defaultTblAlign = TblLeft
 
 type TblGrid = [Integer]
 
@@ -641,9 +651,27 @@ elemToBodyPart ns element
 
     grid <- grid'
     tblLook <- tblLook'
+    let tblAligns = getColumnAlignments ns element
     rows <- mapD (elemToRow ns) (elChildren element)
-    return $ Tbl caption grid tblLook rows
+    return $ Tbl caption grid tblLook tblAligns rows
 elemToBodyPart _ _ = throwError WrongElem
+
+getColumnAlignments :: NameSpaces -> Element -> [TblAlign]
+getColumnAlignments ns element =
+  maybe defaultTblAlign lookupAlignment <$> alignmentAttrs
+  where
+    alignmentAttrs = findAttr (elemName ns "w" "val") <$> alignmentElems
+    alignmentElems = findChildren (elemName ns "w" "tr") element >>=
+      findChildren (elemName ns "w" "tc") >>=
+      findChildren (elemName ns "w" "p") >>=
+      findChildren (elemName ns "w" "pPr") >>=
+      findChildren (elemName ns "w" "jc")
+
+lookupAlignment :: String -> TblAlign
+lookupAlignment "left"   = TblLeft
+lookupAlignment "right"  = TblRight
+lookupAlignment "center" = TblCenter
+lookupAlignment _        = TblJustified
 
 lookupRelationship :: DocumentLocation -> RelId -> [Relationship] -> Maybe Target
 lookupRelationship docLocation relid rels =
