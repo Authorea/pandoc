@@ -73,7 +73,6 @@ import Text.TeXMath (Exp)
 import Text.Pandoc.Readers.Docx.Util
 import Data.Char (readLitChar, ord, chr, isDigit)
 
-
 data ReaderEnv = ReaderEnv { envNotes         :: Notes
                            , envComments      :: Comments
                            , envNumbering     :: Numbering
@@ -654,7 +653,6 @@ elemToBodyPart ns element
     tblLook <- tblLook'
     let tblAligns = getColumnAlignments ns element
     rows <- mapD (elemToRow ns) (elChildren element)
-
     return $ Tbl caption grid tblLook tblAligns rows
 elemToBodyPart _ _ = throwError WrongElem
 
