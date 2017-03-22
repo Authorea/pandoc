@@ -236,11 +236,11 @@ tests = [ testGroup "inlines"
           , testCompare
             "tables"
             "docx/tables.docx"
-            "docx/tables.native"
+            "docx/tables_read.native"
           , testCompare
             "tables with lists in cells"
             "docx/table_with_list_cell.docx"
-            "docx/table_with_list_cell.native"
+            "docx/table_with_list_cell_read.native"
           , testCompare
             "tables with one row"
             "docx/table_one_row.docx"

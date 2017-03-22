@@ -585,8 +585,10 @@ bodyPartToBlocks (Tbl cap _ look aligns (r:rs)) = do
 
       -- The following variable (relative column widths) goes to the
       -- default at the moment. Width information is in the TblGrid
-      -- field of the Tbl, so should be possible.
-  let alignments = convertAlignment <$> aligns
+      -- field of the Tbl, so should be possible. Note that the
+      -- `Table` type only supports column alignments so the top row
+      -- overriddes the other rows' alignments.
+  let alignments = take width $ fmap convertAlignment aligns ++ repeat AlignDefault
       widths = replicate width 0 :: [Double]
 
   return $ table caption (zip alignments widths) hdrCells cells

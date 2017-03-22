@@ -1,4 +1,4 @@
-[Table [] [AlignLeft,AlignLeft] [0.0,0.0]
+[Table [] [AlignDefault,AlignDefault] [0.0,0.0]
  [[Plain [Str "Cell",Space,Str "with",Space,Str "text"]]
  ,[Plain [Str "Cell",Space,Str "with",Space,Str "text"]]]
  [[[BulletList
