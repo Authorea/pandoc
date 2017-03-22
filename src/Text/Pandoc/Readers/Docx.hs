@@ -45,7 +45,7 @@ implemented, [-] means partially implemented):
   - [X] DefinitionList (styled with adjacent `DefinitionTerm` and `Definition`)
   - [X] Header (styled with `Heading#`)
   - [ ] HorizontalRule
-  - [-] Table (column widths and alignments not yet implemented)
+  - [-] Table (column widths not yet implemented)
 
 * Inlines
 
@@ -71,7 +71,6 @@ implemented, [-] means partially implemented):
 module Text.Pandoc.Readers.Docx
        ( readDocxWithWarnings
        , readDocx
-       , tt
        ) where
 
 import Codec.Archive.Zip
@@ -100,23 +99,6 @@ import Data.Traversable (traverse)
 
 import Text.Pandoc.Error
 import Control.Monad.Except
-
-u = error "my error"
-
-tt1 :: IO B.ByteString
-tt1 = B.readFile "/Users/michaelklein/Downloads/Untitleddocument.docx"
-
--- tt2 :: IO (Either Text.Pandoc.Readers.Docx.Parse.DocxError (Docx, [String]))
-tt2 bys = blkbps
-  where
-    Right archive = toArchiveOrFail bys
-    Right (docx, _) = archiveToDocxWithWarnings archive
-    Docx (Document _ (Body body)) = docx
-    (_, blkbps) = sepBodyParts body
-  -- mapM bodyPartToBlocks blkbps
-  -- blks <- smushBlocks <$> mapM bodyPartToBlocks blkbps
-
-tt = tt2 <$> tt1
 
 readDocxWithWarnings :: ReaderOptions
                      -> B.ByteString
@@ -601,13 +583,15 @@ bodyPartToBlocks (Tbl cap _ look aligns (r:rs)) = do
     Just r' -> rowToBlocksList r'
     Nothing -> return $ replicate width mempty
 
+      -- The following variable (relative column widths) goes to the
+      -- default at the moment. Width information is in the TblGrid
+      -- field of the Tbl, so should be possible.
   let alignments = convertAlignment <$> aligns
       widths = replicate width 0 :: [Double]
 
   return $ table caption (zip alignments widths) hdrCells cells
 bodyPartToBlocks (OMathPara e) = do
   return $ para $ displayMath (writeTeX e)
-
 
 convertAlignment :: TblAlign -> Alignment
 convertAlignment TblLeft      = AlignLeft

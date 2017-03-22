@@ -52,7 +52,6 @@ module Text.Pandoc.Readers.Docx.Parse ( Docx(..)
                                       , Cell(..)
                                       , archiveToDocx
                                       , archiveToDocxWithWarnings
-                                      , xx
                                       ) where
 import Codec.Archive.Zip
 import Text.XML.Light
@@ -74,9 +73,6 @@ import Text.TeXMath (Exp)
 import Text.Pandoc.Readers.Docx.Util
 import Data.Char (readLitChar, ord, chr, isDigit)
 
-import Debug.Trace
-
-xx = findAttr
 
 data ReaderEnv = ReaderEnv { envNotes         :: Notes
                            , envComments      :: Comments
@@ -659,27 +655,25 @@ elemToBodyPart ns element
     let tblAligns = getColumnAlignments ns element
     rows <- mapD (elemToRow ns) (elChildren element)
 
-    let fillMeIn = trace ("hi: \n\n\n" ++ splitShow (catMaybes $ fmap (findAttr (elemName ns "w" "val")) $ findChildren (elemName ns "w" "tr") element >>= findChildren (elemName ns "w" "tc") >>= findChildren (elemName ns "w" "p") >>= findChildren (elemName ns "w" "pPr") >>= findChildren (elemName ns "w" "jc")) ++ "\n\n\n\n\n\n\n\n") [TblJustified,TblJustified,TblJustified]
     return $ Tbl caption grid tblLook tblAligns rows
 elemToBodyPart _ _ = throwError WrongElem
 
 getColumnAlignments :: NameSpaces -> Element -> [TblAlign]
-getColumnAlignments ns element = maybe defaultTblAlign lookupAlignments . findAttr (elemName ns "w" "val") <$> cellAlignmentAttributes
+getColumnAlignments ns element =
+  maybe defaultTblAlign lookupAlignment <$> alignmentAttrs
   where
-    cellAlignmentAttributes = findChildren (elemName ns "w" "tr") element >>=
+    alignmentAttrs = findAttr (elemName ns "w" "val") <$> alignmentElems
+    alignmentElems = findChildren (elemName ns "w" "tr") element >>=
       findChildren (elemName ns "w" "tc") >>=
       findChildren (elemName ns "w" "p") >>=
       findChildren (elemName ns "w" "pPr") >>=
       findChildren (elemName ns "w" "jc")
 
-lookupAlignments :: String -> TblAlign
-lookupAlignments "left"   = TblLeft
-lookupAlignments "right"  = TblRight
-lookupAlignments "center" = TblCenter
-lookupAlignments _        = TblJustified
-
-splitShow :: Show a => [a] -> String
-splitShow = unlines . map show
+lookupAlignment :: String -> TblAlign
+lookupAlignment "left"   = TblLeft
+lookupAlignment "right"  = TblRight
+lookupAlignment "center" = TblCenter
+lookupAlignment _        = TblJustified
 
 lookupRelationship :: DocumentLocation -> RelId -> [Relationship] -> Maybe Target
 lookupRelationship docLocation relid rels =
