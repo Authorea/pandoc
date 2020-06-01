@@ -733,7 +733,7 @@ writeOpenXML opts (Pandoc meta blocks) = do
   let auths = docAuthors meta
   let dat = docDate meta
   let abstract' = case lookupMeta "abstract" meta of
-                       Just (MetaBlocks bs) -> bs
+                       Just (MetaBlocks bs) -> [Plain [Strong [Str "Abstract"]]] ++ bs
                        Just (MetaInlines ils) -> [Plain ils]
                        _ -> []
   let subtitle' = case lookupMeta "subtitle" meta of
